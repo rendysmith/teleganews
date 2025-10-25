@@ -3,6 +3,8 @@ import asyncio
 import logging
 import os
 
+import uuid
+
 import pandas as pd
 
 from aiogram import Bot, Dispatcher, Router, types
@@ -70,19 +72,72 @@ async def handle_start(message: types.Message, state: FSMContext):
 @router.callback_query(F.data.startswith("choice:"))
 async def handle_choice(callback: CallbackQuery, state: FSMContext):
     language = callback.data.split(":")[1]
-
     await state.update_data(language=language)
 
     data = await state.get_data()  # получаем всё
     print(data)
 
     text = data['settings']['welcome'][language]
-    await callback.message.edit_text(text)
+    await callback.message.answer(text)
+
+    button_1 = data['settings']['create_guid'][language]
+    button_2 = data['settings']['connect_guid'][language]
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        list_ILKB
+        [types.InlineKeyboardButton(text=button_1, callback_data=f"guid:new")],
+        [types.InlineKeyboardButton(text=button_2, callback_data=f"guid:connect")]
     ])
-    await message.answer("Select a language?", reply_markup=keyboard)
+
+    text_2 = data['settings']['create_or_connect'][language]
+    await callback.message.answer(text_2, reply_markup=keyboard)
+
+@router.callback_query(F.data.startswith("guid:"))
+async def handle_guid(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()  # получаем всё
+    print(data)
+    language = data['language']
+
+    guid_text = callback.data.split(":")[1]
+
+    if 'new' == guid_text:
+        new_guid = str(uuid.uuid4())
+        text = data['settings']['new_id'][language]
+        await callback.message.answer(text)
+        await callback.message.answer(new_guid)
+
+        await state.update_data(guid=new_guid)
+
+    else:
+        old_guid = data['settings']['input_guid'][language]
+        await callback.message.answer(old_guid)
+
+
+
+
+
+    #
+    #
+    #
+    #
+    #
+    #
+    #
+    #
+    #
+    #
+    # text = data['settings']['welcome'][language]
+    # await callback.message.edit_text(text)
+    #
+    # button_1 = data['settings']['create_guid'][language]
+    # button_2 = data['settings']['connect_guid'][language]
+    #
+    # keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    #     [types.InlineKeyboardButton(text=button_1, callback_data=f"guid:new")],
+    #     [types.InlineKeyboardButton(text=button_2, callback_data=f"guid:connect")]
+    # ])
+    #
+    # text_2 = data['settings']['create_or_connect'][language]
+    # await callback.message.answer(text_2, reply_markup=keyboard)
 
 
 
