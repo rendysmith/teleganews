@@ -2,9 +2,13 @@
 import asyncio
 import logging
 import os
-from aiogram import Bot, Dispatcher, Router, types
+import time
+
+from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import CommandStart
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup, CallbackQuery
 from dotenv import load_dotenv
 
 from utils.db_loader import read_data_from_db
@@ -24,8 +28,7 @@ router = Router()
 
 @router.message(CommandStart())
 async def handle_start(message: types.Message):
-    user_id = message.from_user.id
-
+    #user_id = message.from_user.id
     # status, users_ids = await read_data_from_db('white_list_users', 100, 1)
     # user_lists = [i.user_id for i in users_ids]
     # if user_id not in user_lists:
@@ -44,27 +47,31 @@ async def handle_start(message: types.Message):
     await message.answer("Выбери тему:", reply_markup=keyboard)
 
 
-@router.callback_query(F.data.startswith("topc:"))
-async def handle_choice(callback: CallbackQuery, state: FSMContext):
-    language = callback.data.split(":")[1]
-    await state.update_data(language=language)
+@router.callback_query(F.data.startswith("topic:"))
+async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
+    topic = callback.data.split(":")[1]
+    print(topic)
+
+    await state.update_data(topic=topic)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text='за 14 дней', callback_data=f"days:14")],
+        [types.InlineKeyboardButton(text='за 30 дней', callback_data=f"days:30")]
+    ])
+
+    await callback.message.answer('Кол-во дней истории:', reply_markup=keyboard)
+
+@router.callback_query(F.data.startswith("days:"))
+async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
+    days = int(callback.data.split(":")[1])
+    print(days)
 
     data = await state.get_data()  # получаем всё
     print(data)
+    topic = data['topic']
 
-    text = data['settings']['welcome'][language]
-    await callback.message.answer(text)
-
-    button_1 = data['settings']['create_guid'][language]
-    button_2 = data['settings']['connect_guid'][language]
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text=button_1, callback_data=f"guid:new")],
-        [types.InlineKeyboardButton(text=button_2, callback_data=f"guid:connect")]
-    ])
-
-    text_2 = data['settings']['create_or_connect'][language]
-    await callback.message.answer(text_2, reply_markup=keyboard)
+    start_time = time.time() - (days * 24 * 3600)
+    await callback.message.answer(f'Тема: {topic} за последние {days} дней.')
 
 
 

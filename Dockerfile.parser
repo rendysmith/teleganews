@@ -1,0 +1,15 @@
+# Dockerfile.parser (оптимизированный)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY parser.py .
+COPY models/ ./models/
+COPY utils/ ./utils/
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "parser.py"]
