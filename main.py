@@ -6,6 +6,8 @@ from aiogram import Bot, Dispatcher, Router, types
 from aiogram.filters import CommandStart
 from dotenv import load_dotenv
 
+from utils.db_loader import read_data_from_db
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +22,19 @@ router = Router()
 
 @router.message(CommandStart())
 async def handle_start(message: types.Message):
-    await message.answer("Привет! Я ваш Telegram-бот на aiogram 🚀")
+    user_id = message.from_user.id
+
+    status, users_ids = await read_data_from_db('white_list_users', 100, 1)
+
+
+
+    user_lists = [i.user_id for i in users_ids]
+
+
+    if user_id not in user_lists:
+        await message.answer("Ваш доступ ограничен. Обратитесь к администратору.")
+
+
 
 dp.include_router(router)
 
