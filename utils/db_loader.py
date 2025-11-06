@@ -1,0 +1,376 @@
+import asyncio
+from venv import logger
+
+import pandas as pd
+from datetime import datetime
+
+from sqlalchemy import text, update, insert
+from sqlalchemy.future import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
+import os
+from os.path import join, dirname, abspath
+
+from dotenv import load_dotenv
+
+import logging
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
+current_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+current_path = dirname(abspath(__file__))
+
+dotenv_path = join(dirname(dirname(__file__)), '.env')
+#print(dotenv_path)
+# print('Размести .env тут', dirname(dirname(__file__)))
+load_dotenv(dotenv_path)
+
+def pool_conn():
+    host = os.environ.get("POSTGRESQL_HOST")
+    port = os.environ.get("POSTGRESQL_PORT")
+    database = os.environ.get("POSTGRESQL_DB")
+    user = os.environ.get("POSTGRESQL_USERNAME")
+    password = os.environ.get("POSTGRESQL_PASSWORD")
+    DATABASE_URL = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}"
+    return DATABASE_URL
+
+engine = create_async_engine(
+    pool_conn(),
+    pool_size=2,  # Максимальное количество постоянных соединений
+    max_overflow=5,  # Максимальное количество "лишних" соединений
+)
+
+SessionLocal = sessionmaker(
+    bind=engine,
+    expire_on_commit=False,
+    class_=AsyncSession
+)
+
+async def get_api_tokens():
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                result = await session.execute(select(Tokens))
+                tokens_data = result.scalars().all()
+
+                if tokens_data:
+                    api_tokens = [token.api_token for token in tokens_data]
+                    print(api_tokens)
+                    return api_tokens
+                else:
+                    print("No tokens found")
+                    return None
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False
+
+async def get_hosts():
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                try:
+                    result = await session.execute(select(Hosts).filter_by(status="free"))
+                    hosts_data = result.scalars().all()
+                except Exception as Ex:
+                    print((Ex))
+                    return None
+
+                if hosts_data:
+                    hosts = [host.host for host in hosts_data]
+                    print(hosts)
+                    return hosts
+                else:
+                    print("No hosts found")
+                    return None
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False
+
+async def get_user_bt24(email):
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                result = await session.execute(select(UsersBT24).filter_by(email=email))
+                user_data = result.scalars().first()
+                if user_data:
+                    full_name = f"{user_data.last_name} {user_data.name} {user_data.second_name}"
+                    return user_data.email, full_name
+
+                else:
+                    return False, False
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False, False
+
+async def get_pass(username):
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                result = await session.execute(select(Users).filter_by(username=username))
+                user_data = result.scalars().first()
+
+                if user_data:
+                    return user_data.hash_pass, user_data.position
+                else:
+                    return False, False
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False, False
+
+async def get_user_guid(username):
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                result = await session.execute(select(Users).filter_by(username=username))
+                user_data = result.scalars().first()
+
+                if user_data:
+                    return user_data.guid
+                else:
+                    return False
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False
+
+async def get_group_guid(group_name):
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                result = await session.execute(select(Groups).filter_by(group_name=group_name))
+                group_data = result.scalars().first()
+
+                if group_data:
+                    return group_data.guid
+                else:
+                    return False
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False
+
+async def get_role_access(user_guid, group_guid):
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                result = await session.execute(select(Roles).filter_by(user_guid=user_guid, group_guid=group_guid))
+                role_data = result.scalars().first()
+
+                if role_data:
+                    return role_data.guid
+                else:
+                    return False
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False
+
+async def add_user_to_db(username, full_name, position, hash_pass):
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                new_user = Users(username=username, full_name=full_name, position=position, hash_pass=hash_pass)
+                session.add(new_user)
+                await session.commit()
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False
+
+async def add_data_to_db(datas):
+    async with SessionLocal() as session:
+        try:
+            async with session.begin():
+                try:
+                    session.add(datas)
+                    await session.commit()
+                    return True, 'Данные успешно добавлены в базу данных.'
+
+                except Exception as Ex:
+                    await session.rollback()
+                    return False, Ex
+
+        except Exception as Ex:
+            logger.error(f"SQL Error Ex: {Ex}")
+            return False, False
+
+
+async def add_datas_to_db(table_data, mappings):
+    async with SessionLocal() as session:
+        try:
+            # Создаем оператор INSERT для массовой вставки
+            stmt = insert(table_data).values(mappings)
+
+            # Выполняем асинхронно
+            await session.execute(stmt)
+            await session.commit()
+            return True
+        except Exception as Ex:
+            await session.rollback()
+            return Ex
+
+async def add_data_to_db_by_filter(table_data, where_data, value_data, datas):
+    async with SessionLocal() as session:
+        async with session.begin():
+            try:
+                # Check if forum_name already exists
+                existing_rule = await session.execute(
+                    select(table_data).where(where_data)
+                )
+                existing_rule = existing_rule.scalars().first()
+
+                if existing_rule:
+                    # Update existing rule
+                    await session.execute(
+                        update(table_data)
+                        .where(where_data)
+                        .values(value_data)
+                    )
+                    await session.commit()
+                    return True, 'Правило форума успешно обновлено.'
+                else:
+                    # Add new rule
+                    session.add(datas)
+                    await session.commit()
+                    return True, 'Данные успешно добавлены в базу данных.'
+
+            except Exception as Ex:
+                await session.rollback()
+                return False, Ex
+
+async def read_data_from_db(table_data, limit, page):
+    async with SessionLocal() as session:
+        try:
+            query = select(table_data).limit(limit).offset((page - 1) * limit)
+            result = await session.execute(query)
+            results = result.scalars().all()
+            return True, results
+
+        except Exception as Ex:
+            return False, Ex
+
+async def read_data_from_db_filter(table_data, **filter):
+    async with SessionLocal() as session:
+        try:
+            result = await session.execute(select(table_data).filter_by(**filter))
+            results = result.scalars().all()
+            return True, results
+
+        except Exception as Ex:
+            return False, Ex
+
+async def read_data_from_db_filter_limit(table_data, limit, page, **filter):
+    async with SessionLocal() as session:
+        try:
+            query = select(table_data).limit(limit).offset((page - 1) * limit).filter_by(**filter)
+            result = await session.execute(query)
+            results = result.scalars().all()
+            return True, results
+
+        except Exception as Ex:
+            return False, Ex
+
+async def write_to_postgres(df, table_name: str):
+    try:
+        # Записываем новые данные в таблицу
+        df.to_sql(table_name, con=engine, if_exists='replace', index=False)
+        return True, 'OK!'
+
+    except Exception as Ex:
+        return False, f"Ошибка подключения к PostgreSQL: {Ex}"
+
+async def append_to_postgres_results(df, table_name: str):
+    """
+    :param df: DataFrame data
+    :param table_name: DB table name
+    :return:
+    """
+    try:
+        async with SessionLocal() as session:
+            async with session.begin():
+                # Создаем SQL запрос для вставки данных
+                columns = ', '.join(df.columns)
+                values = ', '.join([':' + col for col in df.columns])
+                insert_stmt = f"INSERT INTO {table_name} ({columns}) VALUES ({values})"
+
+                # Выполняем вставку для каждой строки DataFrame
+                for _, row in df.iterrows():
+                    await session.execute(text(insert_stmt), row.to_dict())
+
+                await session.commit()
+        return True, 'OK!'
+
+    except Exception as Ex:
+        return False, f"Ошибка подключения к PostgreSQL: {Ex}"
+
+async def read_from_postgres(table_name: str):
+    async with SessionLocal() as session:
+        try:
+            query = text(f"SELECT * FROM {table_name}")
+
+            # Выполняем запрос
+            result = await session.execute(query)
+
+            # Получаем данные и названия столбцов
+            data = result.fetchall()
+            column_names = result.keys()
+
+            # Создаем pandas DataFrame
+            df = pd.DataFrame(data, columns=column_names)
+            return True, df
+
+        except Exception as Ee:
+            return False, f"Ошибка подключения к PostgreSQL: {Ee}"
+
+
+async def update_data_in_db(table_data, filter_params: dict, update_data: dict):
+    """
+    Обновляет данные в таблице по двум параметрам фильтра
+
+    Args:
+        table_data: Модель таблицы SQLAlchemy
+        filter_params: Словарь с параметрами фильтрации {column_name: value}
+        update_data: Словарь с данными для обновления {column_name: new_value}
+
+    Returns:
+        tuple: (success: bool, result/error)
+    """
+    async with SessionLocal() as session:
+        try:
+            # Создаем условия фильтрации
+            filter_conditions = []
+            for column_name, value in filter_params.items():
+                column = getattr(table_data, column_name)
+                filter_conditions.append(column == value)
+
+            # Строим запрос на обновление
+            query = (
+                update(table_data)
+                .where(and_(*filter_conditions))
+                .values(**update_data)
+            )
+
+            # Выполняем обновление
+            result = await session.execute(query)
+            await session.commit()
+
+            # Проверяем, были ли обновлены строки
+            if result.rowcount > 0:
+                return True, f"Обновлено {result.rowcount} строк"
+            else:
+                return False, "Строки для обновления не найдены"
+
+        except Exception as ex:
+            await session.rollback()
+            return False, ex
+
+if "__main__" in __name__:
+    from models.mdl_tables import Topics
+    a = asyncio.run(read_data_from_db(Topics, 100, 1))
+    print(a)

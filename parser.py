@@ -31,19 +31,6 @@ dotenv_path = os.path.join(current_path, ".env")
 
 load_dotenv(dotenv_path)
 
-
-# admin_id = os.environ.get("admin_id")
-# api_token = os.environ.get("api_token")
-# # api_id = os.environ.get("api_id")
-# # api_hash = os.environ.get('api_hash')
-# # session_string = os.environ.get('session_string')
-# username = os.environ.get("username")
-#
-# time_now = time.time()
-# current_date_str = datetime.now().strftime("%d.%m.%Y")
-#
-# timer_sleeper = 8 * 3600
-
 def diff(a, b):
     s = dif.SequenceMatcher(None, a, b)
     return s.ratio()
