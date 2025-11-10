@@ -61,7 +61,6 @@ async def get_parser_data():
         if session.session == None:
             api_id = session.api_id
             api_hash = session.api_hash
-
             session_string = await get_session(api_id, api_hash)
             print(session_string)
 
@@ -77,34 +76,6 @@ async def get_parser_data():
             await update_data_in_db(Session, filter_params, update_data)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-    session_df = await read_table_id(service, SS_ID, 'sessions')
-    print(session_df)
-
-    if session_df.empty:
-        txt_error = f"! Не получены данные сессий, проблема с GS."
-        print(txt_error)
-        await send_msg(api_token, admin_id, txt_error)
-        sys.exit(0)
-
-    session_df = session_df[session_df['host'] == local_ip]
-    if session_df.empty:
-        txt_error = f"!! На данном хосте не указаны сессии. {local_ip}"
-        print(txt_error)
-        await send_msg(api_token, admin_id, txt_error)
-        sys.exit(0)
 
     session_df['block_time'] = session_df['block_time'].astype(int)
     session_df = session_df[session_df['block_time'] < time_now]

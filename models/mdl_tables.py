@@ -274,6 +274,7 @@ class Session(Base):
     api_id = Column(String, nullable=False, index=True)
     api_hash = Column(String, nullable=False, index=True)
     session = Column(DateTime, nullable=False, index=True)
+    block_time = Column(Integer, nullable=False, index=True)
 
 class Channels(Base):
     """
