@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, UUID, Column, Integer, String, Boolean, DateTime, JSON, func
+from sqlalchemy import create_engine, UUID, Column, Integer, String, Boolean, DateTime, JSON, func, Date
 from sqlalchemy.orm import sessionmaker, declarative_base
 import uuid
 
@@ -285,6 +285,7 @@ class Channels(Base):
 
     channel_id = Column(Integer, primary_key=True, autoincrement=True)
     channel = Column(String, nullable=False, index=True)
+    last_checked_at = Column(Date, nullable=False, index=True)
 
 class Topics(Base):
     """

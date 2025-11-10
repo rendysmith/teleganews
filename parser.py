@@ -1,12 +1,14 @@
 import asyncio
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import os, re
 
 import traceback
 
 import difflib as dif
 import time
+
+from sqlalchemy import or_
 
 from pyrogram import Client
 
@@ -21,9 +23,9 @@ from pyrogram.errors.exceptions.flood_420 import FloodTestPhoneWait, FloodWait
 from dotenv import load_dotenv
 import random
 
-#from utils.central_module import convert_to_list, get_local_ip, send_msg
-from utils.db_loader import read_data_from_db, update_data_in_db
-from models.mdl_tables import Session
+
+from utils.db_loader import read_data_from_db_filter_limit_universal
+from models.mdl_tables import Session, Channels
 
 current_path = os.path.dirname(os.path.dirname(__file__))
 #csv_path = os.path.join(current_path, "channel_list.csv")
@@ -55,90 +57,70 @@ async def get_session(api_id, api_hash):
         return session_string
 
 async def get_parser_data():
-    status, session_df = await read_data_from_db(Session, 100, 1)
+    time_now = time.time()
+    date_now = date.today()
+    is_docker = os.path.exists("/.dockerenv")
+    print(is_docker)
 
+    filters = Session.block_time < time_now #если временная блокировка акка
+    status, session_df = await read_data_from_db_filter_limit_universal('sessions', 100, 1, filters)
+    print(status)
+    print(session_df)
+
+    sessionS = []
     for session in session_df:
         if session.session == None:
-            api_id = session.api_id
-            api_hash = session.api_hash
-            session_string = await get_session(api_id, api_hash)
-            print(session_string)
+            if is_docker:
+                continue  # пропускаем в Docker
 
-            filter_params = {
-                'api_id': api_id,
-                'api_hash': api_hash
-            }
+            else:
+                api_id = session.api_id
+                api_hash = session.api_hash
+                session_string = await get_session(api_id, api_hash)
+                print(session_string)
 
-            update_data = {
-                'session': session_string
-            }
+                filter_params = {
+                    'api_id': api_id,
+                    'api_hash': api_hash
+                }
 
-            await update_data_in_db(Session, filter_params, update_data)
+                update_data = {
+                    'session': session_string
+                }
 
+                await update_data_in_db(Session, filter_params, update_data)
 
+        else:
+            sessionS.append(session)
 
-    session_df['block_time'] = session_df['block_time'].astype(int)
-    session_df = session_df[session_df['block_time'] < time_now]
-
-    if session_df.empty:
-        txt_error = f"!!! Все сессии во временном бане. {local_ip}"
+    if sessionS == []:
+        txt_error = f"!!! Все сессии во временном бане."
         print(txt_error)
-        await send_msg(api_token, admin_id, txt_error)
-        sys.exit(0)
+        return
 
-    session_strings = session_df.to_dict('list')
-    len_ses = len(session_strings[next(iter(session_strings))])
-    print(f"- len_ses: {len_ses}")
+    filters2 = or_(Channels.last_checked_at != date_now,
+                   Channels.last_checked_at.is_(None))
 
-    # Получаем список пользователей
-    df = await read_table_id(service, SS_ID, 'sets')
-    print(df)
-
-    # Получаем список каналов
-    CHAN_df = await read_table_id(service, SS_ID, 'channel_list')
-    CHANNELS_df = CHAN_df[CHAN_df['host'] == local_ip]
-    CHANNELS_df = CHANNELS_df[CHANNELS_df['pars_date'] != current_date_str]
-    CHANNELS = CHANNELS_df['channels'].tolist()
+    status, CHANNELS = await read_data_from_db_filter_limit_universal('channels', 100, 1, filters2)
     random.shuffle(CHANNELS)
 
     len_df = len(CHANNELS)
     print("len_df:", len_df)
     if len_df == 0:
-        sys.exit(0)
+        return
 
-    rnd_rime = int(timer_sleeper / len_df)
-    print('rnd_rime:', rnd_rime)
-
-    msgs_df = await read_table_id(service, SS_ID, 'bot_msg')
-
-    comments = []
-
-    for _idx_, channel in enumerate(CHANNELS):
+    for _idx_, channel_data in enumerate(CHANNELS):
         if _idx_ == 6: #опрашивать 7 каналов за раз.
             return
 
-        idx_ch = CHAN_df[CHAN_df['channels'] == channel].index[0]
+        channel = channel_data.channel
 
-        errors = False
-        num_ch = CHANNELS.index(channel)
-        as_sl = random.randint(120, 200)
-        print(
-            f"\n- Channel #{num_ch}: Получение новых сообщений из канала @{channel} (ожидание до {as_sl})"
-        )
+        idx_ses = random.randrange(0, len(sessionS))
 
-        if len_ses == 1:
-            idx_ses = 0
-        else:
-            idx_ses = random.randint(0, len_ses - 1)
-
-        bot_name = session_strings['bot_name'][idx_ses]
-        api_id = session_strings['api_id'][idx_ses]
-        api_hash = session_strings['api_hash'][idx_ses]
-        session_string = session_strings['session_string'][idx_ses]
-        number_phone = session_strings['number_phone'][idx_ses]
-        #print(api_id, number_phone)
-
-        tag = str(api_id)[:3]
+        bot_name = sessionS[idx_ses].user_name
+        api_id = sessionS[idx_ses].api_id
+        api_hash = sessionS[idx_ses].api_hash
+        session_string = sessionS[idx_ses].session
 
         try:
             async with Client(
@@ -149,21 +131,8 @@ async def get_parser_data():
                 in_memory=True,
             ) as client:
 
-                print(f"\nConnect {tag}: -------------------> {time.ctime()}")
+                print(f"\nConnect {bot_name}: --------- https://t.me/{channel} ----------> {time.ctime()}")
                 try:
-
-                    msgs_df['unix_date'] = msgs_df['unix_date'].astype(int)
-                    msgs_df = msgs_df[msgs_df['unix_date'] + (30 * 24 * 3600) > time_now]
-
-                    if len(msgs_df) != 0:
-                        msgs = msgs_df['message'].tolist()
-
-                    else:
-                        msgs = []
-
-                    # Получаем последние 10 сообщений
-                    # messages = client.get_chat_history(chat_id=chat.id, limit=10)
-
                     if 't.me/+' in channel:
                         base_url = ''
                         try:
@@ -183,11 +152,17 @@ async def get_parser_data():
 
                     # Выводим текст последних сообщений
                     msg_dates = []
-                    async for message in client.get_chat_history(chat_id=chat.id, limit=20):
+                    async for message in client.get_chat_history(chat_id=chat.id, limit=100):
+                        print(message)
+                        input()
+                        continue
+
+
+
                         message_date = message.date
                         msg_dates.append(message_date)
                         current_date = datetime.now()
-                        week_ago = current_date - timedelta(days=7)
+                        week_ago = current_date - timedelta(days=30)
 
                         if message_date < week_ago:
                             # Сообщение старше недели, пропускаем его
@@ -197,6 +172,8 @@ async def get_parser_data():
                         message_id = message.id
                         link_msg = f"{base_url}{channel}/{message_id}"
                         msg = message.text
+
+                        input(msg)
 
                         if msg is None:
                             print(f"--- Сообщение {msg}, пропускаем его\n{link_msg}")
