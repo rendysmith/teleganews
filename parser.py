@@ -153,190 +153,21 @@ async def get_parser_data():
                     # Выводим текст последних сообщений
                     msg_dates = []
                     async for message in client.get_chat_history(chat_id=chat.id, limit=100):
-                        print(message)
-                        input()
-                        continue
-
-
-
                         message_date = message.date
-                        msg_dates.append(message_date)
                         current_date = datetime.now()
                         week_ago = current_date - timedelta(days=30)
 
                         if message_date < week_ago:
-                            # Сообщение старше недели, пропускаем его
+                            print('msg > 30 дней')
                             continue
 
-                        formatted_date = message_date.strftime("%d.%m.%Y %H:%M:%S")
                         message_id = message.id
-                        link_msg = f"{base_url}{channel}/{message_id}"
-                        msg = message.text
-
-                        input(msg)
-
-                        if msg is None:
-                            print(f"--- Сообщение {msg}, пропускаем его\n{link_msg}")
-                            continue
-
-                        #msg_hash = await hash_and_compare(msg)
-
-                        if msg in msgs:
-                            print("--- Такое сообщение уже есть в базе, пропускаем его")
-                            continue
-
-                        unix_date = str(int(time.time()))
-
-                        for idx, row in df.iterrows():
-                            chat_id = row["user_id"]
-                            try:
-                                white_list_any = await convert_to_list(row["white_list_any"])
-                            except:
-                                white_list_any = []
-
-                            try:
-                                white_list_all = await convert_to_list(row["white_list_all"])
-                            except:
-                                white_list_all = []
-
-                            try:
-                                black_list_any = await convert_to_list(row["black_list_any"])
-                            except:
-                                black_list_any = []
-
-                            try:
-                                black_list_all = await convert_to_list(row["black_list_all"])
-                            except:
-                                black_list_all = []
-
-                            if (
-                                not white_list_any and
-                                not white_list_all and
-                                not black_list_any and
-                                not black_list_all
-                            ):
-                                print(
-                                    f"--- {chat_id} Поисковые настройки пустые! Пропускаем пользователя."
-                                )
-                                continue
-
-                            wlan = (
-                                True
-                                if not white_list_any
-                                else any(
-                                    white.lower() in msg.lower() for white in white_list_any
-                                )
-                            )
-                            wlal = (
-                                True
-                                if not white_list_all
-                                else all(
-                                    white.lower() in msg.lower() for white in white_list_all
-                                )
-                            )
-                            blan = (
-                                True
-                                if not black_list_any
-                                else any(
-                                    black.lower() not in msg.lower()
-                                    for black in black_list_any
-                                )
-                            )
-                            blal = (
-                                True
-                                if not black_list_all
-                                else all(
-                                    black.lower() not in msg.lower()
-                                    for black in black_list_all
-                                )
-                            )
-
-                            if wlan and wlal and blan and blal:
-                                print(f"+++++++++++++RESEND=POST+{chat_id}+++++++++++++")
-
-                                #order = moderator(msg)
-
-                                # channel_text = channel.replace("_", r"\_")
-                                text = f"Link: {base_url}{channel}/{message_id}\nDate: {formatted_date} ({tag})\n\n{msg}"
-                                try:
-                                    await send_msg(api_token, chat_id, text)
-
-                                except Exception as e:
-                                    print(f"Error Chat_ID: {chat_id}")
-                                    if (
-                                        "Telegram server says - Forbidden: bot was blocked by the user"
-                                        in str(e)
-                                    ):
-
-                                        columns_block = ["white_list_any",
-                                                         "white_list_all",
-                                                         "black_list_any",
-                                                         "black_list_all"]
-
-                                        datas_block = ['bot was blocked by the user'] * 4
-
-                                        idx_user = df[df['user_id'] == chat_id].index[0]
-                                        await append_data_to_sheet_cells(service,
-                                                                         SS_ID,
-                                                                         'sets',
-                                                                         columns_block,
-                                                                         idx_user + 2,
-                                                                         datas_block)
-                                        continue
-
-                                await asyncio.sleep(5)
-
-                                data_list = {"unix_date": unix_date,
-                                             "channel": channel,
-                                             "message_id": message_id}
-                                await append_data_to_sheet_scope(service, SS_ID, 'channel_stat', data_list)
-
-                                data_list2 = {"unix_date": unix_date,
-                                              "message": msg}
-
-                                if msg in comments:
-                                    continue
-
-                                else:
-                                    await append_data_to_sheet_scope(service, SS_ID, "bot_msg", data_list2)
-                                    comments.append(msg)
-
-                                print(f"+++ Double Commit! {time.ctime()}")
-
-                            else:
-                                print(
-                                    f"--- {chat_id} No match {base_url}{channel}/{message_id}, next..."
-                                )
-
-                        now = datetime.now().hour
-                        if now == 1:
-                            #await delete_data_pars()
-                            print("--- Delete Commits!")
+                        msg = message.text if message.text is not None else message.caption
 
 
-                    if len(msg_dates) == 0:
-                        columns = ["last_date", "pars_date", "host", "status"]
-                        datas = ["None", current_date_str, "None", "No msg"]
 
-                        await append_data_to_sheet_cells(service,
-                                                         SS_ID,
-                                                         'channel_list',
-                                                         columns,
-                                                         idx_ch + 2,
-                                                         datas)
 
-                        continue
 
-                    record_date = max(msg_dates).strftime("%Y.%m.%d")
-                    columns = ["last_date", "pars_date"]
-                    datas = [record_date, current_date_str]
-
-                    await append_data_to_sheet_cells(service,
-                                                    SS_ID,
-                                                    'channel_list',
-                                                     columns,
-                                                     idx_ch + 2,
-                                                     datas)
 
                 except PeerIdInvalid as pe:
                     txt = f"-- Error 400: {api_id} {number_phone}\n{str(pe)}\nchannel: @{channel}"
