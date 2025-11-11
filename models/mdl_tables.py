@@ -297,6 +297,21 @@ class Topics(Base):
     topic_id = Column(Integer, primary_key=True, autoincrement=True)
     topic = Column(String, nullable=False, index=True)
 
+class History(Base):
+    """
+    Table with topics
+    """
+    __tablename__ = "history"
+    __table_args__ = {"schema": "tg_ai"}
+
+    history_id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(DateTime, nullable=False, index=True)
+    channel = Column(String, nullable=False, index=True)
+    message_id = Column(Integer, nullable=False, index=True)
+    message = Column(String, nullable=False, index=True)
+
+
+
 
 
 
