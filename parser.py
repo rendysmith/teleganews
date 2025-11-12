@@ -27,7 +27,8 @@ import random
 from types import SimpleNamespace
 
 
-from utils.db_loader import read_data_from_db_filter_limit_universal, add_data_to_db_universal
+from utils.db_loader import read_data_from_db_filter_limit_universal, add_data_to_db_universal, \
+    update_data_from_db_universal
 from models.mdl_tables import Session, Channels, History
 
 current_path = os.path.dirname(os.path.dirname(__file__))
@@ -157,7 +158,7 @@ async def get_parser_data():
 
                         if message_date < week_ago:
                             print('msg > 30 дней')
-                            continue
+                            break
 
                         message_id = message.id
                         msg = message.text if message.text is not None else message.caption
@@ -170,8 +171,7 @@ async def get_parser_data():
                                        History.message_id == message_id)
 
                         status3, result3 = await read_data_from_db_filter_limit_universal('history', 1, 1, filters3)
-                        print(status3)
-                        print(f"result3 = {result3}")
+                        print(f"3 check data: {status3} {result3}")
 
                         if result3 != []:
                             continue
@@ -187,15 +187,23 @@ async def get_parser_data():
                         )
 
                         status4, result4 = await add_data_to_db_universal(rec_datas)
-                        print("status4:", status4)
-                        print("result4:", result4)
+                        print(f"4 Add new row: {status4} {result4}")
 
                         await asyncio.sleep(1)
 
                 except Exception as Ex1:
                     print(f'Error1: {Ex1}')
 
+            update_data = SimpleNamespace(
+                table_name="channels",
+                column="last_checked_at",
+                filter_column="channel",
+                filter_value=channel,
+                new_data=date_now
+            )
 
+            status5, result5 = await update_data_from_db_universal(update_data)
+            print("5 update data:", status5, result5)
 
         except Exception as Ex2:
             print(f'Error2: {Ex2}')

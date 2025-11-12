@@ -95,8 +95,6 @@ async def add_data_to_db_universal(datas):
                         model = mapper.class_
                         break
 
-                print(model)
-
                 if not model:
                     txt =  f"Таблица {table_name} не найдена"
                     #print(txt)
@@ -121,17 +119,16 @@ async def add_data_to_db_universal(datas):
                 await session.rollback()
                 return False, Ex
 
-
 async def update_data_from_db_universal(datas):
     table_name = datas.table_name
     column = datas.column
-    position = datas.position
+    filter_column = datas.filter_column  # добавляем фильтр-колонку (например channel)
+    filter_value = datas.filter_value    # и её значение
     new_data = datas.new_data
 
     async with SessionLocal() as session:
         async with session.begin():
             try:
-                # 1. Находим модель таблицы
                 model = None
                 for mapper in Base.registry.mappers:
                     if mapper.class_.__tablename__ == table_name:
@@ -139,39 +136,35 @@ async def update_data_from_db_universal(datas):
                         break
 
                 if not model:
-                    txt_m = f"Таблица {table_name} не найдена"
-                    return False, txt_m
+                    return False, f"Таблица {table_name} не найдена"
 
-                # 2. Проверяем существование колонки
                 if not hasattr(model, column):
-                    txt_h = f"Колонка {column} не существует в таблице {table_name}"
-                    return False, txt_h
+                    return False, f"Колонка {column} не существует"
 
-                # 3. Получаем запись
-                record = await session.get(model, position)
+                if not hasattr(model, filter_column):
+                    return False, f"Колонка фильтра {filter_column} не существует"
+
+                # Находим запись по фильтру
+                stmt = select(model).where(getattr(model, filter_column) == filter_value)
+                result = await session.execute(stmt)
+                record = result.scalar_one_or_none()
+
                 if not record:
-                    txt_r = f"Запись с ID {position} не найдена"
-                    return False, txt_r
+                    return False, f"Запись с {filter_column}={filter_value} не найдена"
 
-                # 4. Проверяем, что колонка не является первичным ключом
                 primary_keys = [pk.name for pk in inspect(model).primary_key]
                 if column in primary_keys:
-                    txt_c = "Нельзя изменять первичный ключ"
-                    return False, txt_c
+                    return False, "Нельзя изменять первичный ключ"
 
-                # 5. Обновляем значение
                 setattr(record, column, new_data)
                 session.add(record)
                 await session.commit()
                 return True, "Значение успешно обновлено"
 
-            except ValueError as ve:
-                await session.rollback()
-                return False, str(ve)
-
             except Exception as e:
                 await session.rollback()
-                return False, f"Ошибка при обновлении: {str(e)}"
+                return False, f"Ошибка: {str(e)}"
+
 
 if "__main__" in __name__:
     from models.mdl_tables import Topics, Base
