@@ -171,7 +171,7 @@ async def get_parser_data():
                                        History.message_id == message_id)
 
                         status3, result3 = await read_data_from_db_filter_limit_universal('history', 1, 1, filters3)
-                        print(f"3 check data: {status3} {result3}")
+                        print(f"3 check data: {status3}")
 
                         if result3 != []:
                             continue
@@ -203,7 +203,7 @@ async def get_parser_data():
             )
 
             status5, result5 = await update_data_from_db_universal(update_data)
-            print("5 update data:", status5, result5)
+            print("5 update last date:", status5, result5)
 
         except Exception as Ex2:
             print(f'Error2: {Ex2}')
