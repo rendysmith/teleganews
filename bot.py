@@ -6,11 +6,14 @@ import time
 from datetime import datetime, timedelta
 
 import httpx
+
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, CallbackQuery
+from aiogram.client.default import DefaultBotProperties
+
 from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 
@@ -25,7 +28,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден. Проверьте файл .env")
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher()
 router = Router()
 
@@ -79,7 +82,7 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     filters = History.date > start_time
     status, history = await read_data_from_db_filter_limit_universal('history', 100, 1, filters)#            read_data_from_db(Topics, 100, 1)
     short_history = [f"{i.message}\nlink: 'https://t.me/{i.channel}/{i.message_id}'" for i in history]
-    #print(short_history)
+    print(short_history)
 
     prompt = f"""
     Ты опытный копирайтер с многолетним стажем.
@@ -89,8 +92,8 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     --------------------КОНЕЦ СООБЩЕНИЙ---------------------------
     Далее ты должен найти статьи которые бы касались тематике "{topic}" и сделать следующее.
     - выдать короткие саммари, что случилось и ссылки.
-    - Информация не должна дублироваться (хотя бы большая часть).
-    
+    - Информация не должна дублироваться.
+    - Если ты не знаешь точную дату, не придумывай её.
     """
 
     auth = HTTPBasicAuth('anku@sidorinlab.ru', 'pass')
