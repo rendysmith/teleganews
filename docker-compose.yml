@@ -1,55 +1,32 @@
-version: '3.8'
-
+version: '3.8' # Можно оставить, но Docker его игнорирует
 services:
-  # --- 1. База данных ---
-  db:
-    image: postgres:15-alpine
-    container_name: telegram_project_db
-    restart: always
-    environment:
-      # Слева - то, что ждет контейнер Postgres. Справа - то, что у тебя в .env
-      POSTGRES_USER: ${POSTGRESQL_USERNAME}
-      POSTGRES_PASSWORD: ${POSTGRESQL_PASSWORD}
-      POSTGRES_DB: ${POSTGRESQL_DB}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      # Проверяем готовность базы, используя твои переменные
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRESQL_USERNAME} -d ${POSTGRESQL_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  # --- 2. Телеграм Бот ---
+  # --- 1. Телеграм Бот ---
   telegram-bot:
     build:
       context: .
       dockerfile: Dockerfile.bot
     container_name: telega_bot
     restart: always
-    # Передаем файл .env внутрь контейнера, чтобы Python видел POSTGRESQL_...
+    # Передаем файл .env, где указаны внешние POSTGRESQL_HOST и порт
     env_file: .env
-    depends_on:
-      db:
-        condition: service_healthy
     volumes:
-      - ./sessions:/app/sessions
+      - ./sessions:/app/sessions  # Сохраняем сессии
       - ./logs:/app/logs
+    # Порт 8080 - пример, если боту нужен вебхук или health check
+    # ports:
+    #   - "8080:8080"
 
-  # --- 3. Парсер ---
+  # --- 2. Парсер (с планировщиком) ---
   data-parser:
     build:
       context: .
       dockerfile: Dockerfile.parser
     container_name: telega_parser
     restart: always
+    # Передаем файл .env, где указаны внешние POSTGRESQL_HOST и порт
     env_file: .env
-    depends_on:
-      db:
-        condition: service_healthy
     volumes:
-      - ./sessions:/app/sessions
+      - ./sessions:/app/sessions  # Общая папка с сессиями
       - ./logs:/app/logs
 
-volumes:
-  postgres_data:
+# Секция volumes удалена, так как нет локальной базы данных
