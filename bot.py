@@ -110,20 +110,6 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
         else:
             await callback.message.answer(response.status_code)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 dp.include_router(router)
 
 async def main():

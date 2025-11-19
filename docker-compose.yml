@@ -1,40 +1,55 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:13
+  # --- 1. База данных ---
+  db:
+    image: postgres:15-alpine
+    container_name: telegram_project_db
+    restart: always
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      # Слева - то, что ждет контейнер Postgres. Справа - то, что у тебя в .env
+      POSTGRES_USER: ${POSTGRESQL_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRESQL_PASSWORD}
+      POSTGRES_DB: ${POSTGRESQL_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Проверяем готовность базы, используя твои переменные
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRESQL_USERNAME} -d ${POSTGRESQL_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  redis:
-    image: redis:alpine
-
-  parser:
-    build:
-      context: .
-      dockerfile: Dockerfile.parser
-    environment:
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-    depends_on:
-      - postgres
-      - redis
-
-  bot:
+  # --- 2. Телеграм Бот ---
+  telegram-bot:
     build:
       context: .
       dockerfile: Dockerfile.bot
-    environment:
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      - BOT_TOKEN=${BOT_TOKEN}
+    container_name: telega_bot
+    restart: always
+    # Передаем файл .env внутрь контейнера, чтобы Python видел POSTGRESQL_...
+    env_file: .env
     depends_on:
-      - postgres
-      - redis
-    ports:
-      - "8080:8080"
+      db:
+        condition: service_healthy
+    volumes:
+      - ./sessions:/app/sessions
+      - ./logs:/app/logs
+
+  # --- 3. Парсер ---
+  data-parser:
+    build:
+      context: .
+      dockerfile: Dockerfile.parser
+    container_name: telega_parser
+    restart: always
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./sessions:/app/sessions
+      - ./logs:/app/logs
 
 volumes:
   postgres_data:

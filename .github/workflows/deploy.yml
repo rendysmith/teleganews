@@ -1,0 +1,30 @@
+name: Production Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Позволяет запустить вручную кнопку в GitHub
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VDS via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VDS_HOST }}
+          username: ${{ secrets.VDS_USER }}
+          key: ${{ secrets.VDS_SSH_KEY }}
+          port: 22
+          script: |
+            # 1. Переходим в папку проекта (замени путь на свой!)
+            cd /root/teleganews
+            
+            # 2. Обновляем код
+            git pull origin main
+            
+            # 3. Пересобираем и перезапускаем контейнеры в фоне
+            docker compose up -d --build
+            
+            # 4. Чистим старые неиспользуемые образы (чтобы не забить диск)
+            docker image prune -f
