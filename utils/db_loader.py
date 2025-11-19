@@ -165,6 +165,14 @@ async def update_data_from_db_universal(datas):
                 await session.rollback()
                 return False, f"Ошибка: {str(e)}"
 
+async def update_universal(session, query):
+    await session.execute(query)
+    await session.commit()
+
+async def read_universal(session, query):
+    result = await session.execute(query)
+    return result.scalars().all()
+
 
 if "__main__" in __name__:
     from models.mdl_tables import Topics, Base

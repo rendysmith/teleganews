@@ -4,12 +4,10 @@ from datetime import datetime, timedelta, date
 import os, re
 
 import traceback
-
 import difflib as dif
 import time
 
 from sqlalchemy import or_, and_
-
 from pyrogram import Client
 
 from pyrogram.errors.exceptions.bad_request_400 import (
@@ -25,10 +23,26 @@ import random
 
 from types import SimpleNamespace
 
+import asyncio
+import logging
+import sys
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from utils.db_loader import read_data_from_db_filter_limit_universal, add_data_to_db_universal, \
-    update_data_from_db_universal
+
+from utils.db_loader import (read_data_from_db_filter_limit_universal,
+                             add_data_to_db_universal,
+                             update_data_from_db_universal,
+                             update_universal)
+
 from models.mdl_tables import Session, Channels, History
+
+# Настройка логирования (чтобы видеть output в логах Docker)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    stream=sys.stdout
+)
+logger = logging.getLogger("ParserWorker")
 
 current_path = os.path.dirname(os.path.dirname(__file__))
 #csv_path = os.path.join(current_path, "channel_list.csv")
@@ -135,7 +149,7 @@ async def get_parser_data():
                         try:
                             chat = await client.join_chat(channel)
 
-                        except FloodWait:
+                        except FloodWait as fw:
                             txt = f"-- Error 420: {api_id}\n{str(fw)}"
                             traceback.print_exc()
                             errors = True
@@ -209,129 +223,42 @@ async def get_parser_data():
             await asyncio.sleep(5)
 
 
+# --- ОБЕРТКА ДЛЯ ПЛАНИРОВЩИКА ---
+async def main():
+    logger.info("Запуск контейнера парсера...")
+
+    # Инициализируем планировщик
+    scheduler = AsyncIOScheduler()
+
+    # ---------------- НАСТРОЙКА РАСПИСАНИЯ ----------------
+    # Вариант А: Интервал (например, каждые 30 минут)
+    scheduler.add_job(get_parser_data, "interval", minutes=30)
+
+    # Вариант Б: Конкретное время (например, каждый день в 09:00)
+    # scheduler.add_job(get_parser_data, "cron", hour=9, minute=0)
+    # ------------------------------------------------------
+
+    # Запускаем планировщик
+    scheduler.start()
+    logger.info("Планировщик запущен. Ожидание задач...")
+
+    # (Опционально) Запустить один раз сразу при старте контейнера
+    logger.info("Выполняю первичный запуск при старте...")
+    await get_parser_data()
+
+    # ВАЖНО: Бесконечное ожидание.
+    # Без этого скрипт дойдет до конца файла, завершится, и Docker остановит контейнер.
+    try:
+        # Эффективный способ "спать вечно", не нагружая процессор
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit):
+        pass
 
 
 
-
-
-
-
-
-
-
-    #
-    #
-    #
-    #             except PeerIdInvalid as pe:
-    #                 txt = f"-- Error 400: {api_id}\n{str(pe)}\nchannel: @{channel}"
-    #                 await append_data_to_sheet_cell(service,
-    #                                                 SS_ID,
-    #                                                 'channel_list',
-    #                                                 'status',
-    #                                                 idx_ch + 2,
-    #                                                 str(pe))
-    #                 traceback.print_exc()
-    #                 errors = True
-    #
-    #             except UsernameNotOccupied as uno:
-    #                 txt = f"-- Error 400: {api_id} {number_phone}\n{str(uno)}\nchannel: @{channel}"
-    #                 await append_data_to_sheet_cell(service,
-    #                                                 SS_ID,
-    #                                                 'channel_list',
-    #                                                 'status',
-    #                                                 idx_ch + 2,
-    #                                                 str(uno))
-    #                 traceback.print_exc()
-    #                 errors = True
-    #
-    #             except UsernameInvalid as ui:
-    #                 txt = f"-- Error 400: {api_id} {number_phone}\n{str(ui)}\nchannel: @{channel}"
-    #                 await append_data_to_sheet_cell(service,
-    #                                                 SS_ID,
-    #                                                 'channel_list',
-    #                                                 'status',
-    #                                                 idx_ch + 2,
-    #                                                 str(ui))
-    #                 traceback.print_exc()
-    #                 errors = True
-    #
-    #             except InviteHashExpired as ie:
-    #                 txt = f"-- Error 400: {api_id} {number_phone}\n{str(ui)}\nchannel: @{channel}"
-    #                 await append_data_to_sheet_cell(service,
-    #                                                 SS_ID,
-    #                                                 'channel_list',
-    #                                                 'status',
-    #                                                 idx_ch + 2,
-    #                                                 str(ie))
-    #                 traceback.print_exc()
-    #                 errors = True
-    #
-    #             except FloodTestPhoneWait as fe:
-    #                 txt = f"-- Error 420: {api_id} {number_phone}\n{str(fe)}"
-    #                 traceback.print_exc()
-    #                 errors = True
-    #
-    #             except FloodWait as fw:
-    #                 txt = f"-- Error 420: {api_id} {number_phone}\n{str(fw)}"
-    #                 traceback.print_exc()
-    #                 errors = True
-    #
-    #             except Exception as e:
-    #                 txt_error = traceback.format_exc()
-    #                 txt = (
-    #                     f"-- Ошибка при получении сообщений API_ID {api_id} {number_phone}\n"
-    #                     f"-- {str(e)}\n"
-    #                     f"-- {txt_error}"
-    #                 )
-    #
-    #                 print(txt)
-    #                 traceback.print_exc()
-    #                 errors = True
-    #
-    #             finally:
-    #                 if errors:
-    #                     await send_msg(api_token, admin_id, txt)
-    #                     wait_seconds = extract_flood_wait_seconds(txt)
-    #
-    #                     if wait_seconds is not None:
-    #                         txt_error = f"!!! Временный бан, время ожидания: {wait_seconds} с."
-    #                         await send_msg(api_token, admin_id, txt_error)
-    #
-    #                         idx_api = session_df[session_df['api_id'] == api_id].index[0]
-    #                         await append_data_to_sheet_cell(service,
-    #                                                         SS_ID,
-    #                                                         'sessions',
-    #                                                         'block_time',
-    #                                                         idx_api + 2,
-    #                                                         time.time() + wait_seconds)
-    #
-    #                         return
-    #
-    #                     else:
-    #                         print("Число не найдено в тексте.")
-    #
-    #             await asyncio.sleep(as_sl)
-    #
-    #     except FloodWait as fw:
-    #         await send_msg(api_token, admin_id, fw)
-    #         wait_seconds = extract_flood_wait_seconds(fw)
-    #
-    #         if wait_seconds is not None:
-    #             txt_error = f"!!! Временный бан, время ожидания: {wait_seconds} с."
-    #             await send_msg(api_token, admin_id, txt_error)
-    #             idx_api = session_df[session_df['api_id'] == api_id].index[0]
-    #             await append_data_to_sheet_cell(service,
-    #                                             SS_ID,
-    #                                             'sessions',
-    #                                             'block_time',
-    #                                             idx_api + 2,
-    #                                             time.time() + wait_seconds)
-    #
-    #             sys.exit(0)
-    #
-    # return
-
-if "__main__" in __name__:
-    #asyncio.run(tststs())
-
-    asyncio.run(get_parser_data())
+if __name__ == "__main__":
+    try:
+        # Запускаем асинхронный цикл
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Остановка парсера...")

@@ -7,3 +7,4 @@ pandas
 sqlalchemy
 asyncpg
 greenlet
+apscheduler==3.10.4
