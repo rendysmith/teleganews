@@ -68,15 +68,14 @@ async def get_session(api_id, api_hash):
         return session_string
 
 async def get_parser_data():
+    logger.info("▶ Start parsing iteration...")
     time_now = time.time()
     date_now = date.today()
+
     is_docker = os.path.exists("/.dockerenv")
-    print(is_docker)
 
     filters = Session.block_time < time_now #если временная блокировка акка
     status, session_df = await read_data_from_db_filter_limit_universal('sessions', 100, 1, filters)
-    print(status)
-    print(session_df)
 
     sessionS = []
     for session in session_df:
@@ -88,7 +87,6 @@ async def get_parser_data():
                 api_id = session.api_id
                 api_hash = session.api_hash
                 session_string = await get_session(api_id, api_hash)
-                print(session_string)
 
                 filter_params = {
                     'api_id': api_id,
@@ -121,7 +119,8 @@ async def get_parser_data():
         return
 
     for _idx_, channel_data in enumerate(CHANNELS):
-        if _idx_ == 6: #опрашивать 7 каналов за раз.
+        if _idx_ >= 7: #опрашивать 7 каналов за раз.
+            logger.info("Batch limit reached (7 channels). Finishing job.")
             return
 
         channel = channel_data.channel
