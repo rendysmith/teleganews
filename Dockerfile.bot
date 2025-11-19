@@ -1,17 +1,20 @@
-# Dockerfile.bot (оптимизированный)
 FROM python:3.12-slim
+
+# Чтобы логи (print) сразу появлялись в консоли, а не буферизировались
+ENV PYTHONUNBUFFERED=1
+# Добавляем текущую папку в Python path, чтобы импорты models и utils работали корректно
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
-# Копируем зависимости сначала (для кэширования)
+# Копируем зависимости и устанавливаем их (без кэша pip для экономии места)
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем только нужные файлы
+# Копируем код
 COPY bot.py .
 COPY models/ ./models/
 COPY utils/ ./utils/
 
-ENV PYTHONPATH=/app
-
-CMD ["python", "bot.py"]y"]
+# Запускаем (исправлена опечатка в конце строки)
+CMD ["python", "bot.py"]
