@@ -18,13 +18,17 @@ from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 
 from utils.db_loader import read_data_from_db_filter_limit_universal
-from models.mdl_tables import Topics, History
+from models.mdl_tables import History, Prompt
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+LOGIN_GEN = os.getenv("LOGIN_GEN")
+PASS_GEN = os.getenv("PASS_GEN")
+
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден. Проверьте файл .env")
 
@@ -82,21 +86,14 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     filters = History.date > start_time
     status, history = await read_data_from_db_filter_limit_universal('history', 100, 1, filters)#            read_data_from_db(Topics, 100, 1)
     short_history = [f"{i.message}\nlink: 'https://t.me/{i.channel}/{i.message_id}'" for i in history]
-    print(short_history)
+    #print(short_history)
 
-    prompt = f"""
-    Ты опытный копирайтер с многолетним стажем.
-    Твоя задача внимательно прочитать сообщения из социальных сетей которые представлены в виде списка
-    --------------------НАЧАЛО СООБЩЕНИЙ--------------------------
-    {short_history}
-    --------------------КОНЕЦ СООБЩЕНИЙ---------------------------
-    Далее ты должен найти статьи которые бы касались тематике "{topic}" и сделать следующее.
-    - выдать короткие саммари, что случилось и ссылки.
-    - Информация не должна дублироваться.
-    - Если ты не знаешь точную дату, не придумывай её.
-    """
+    filter2 = Prompt.project_name == 'tg_news'
+    status, prompt_context = await read_data_from_db_filter_limit_universal('prompts', 1, 1, filter2)
 
-    auth = HTTPBasicAuth('anku@sidorinlab.ru', 'pass')
+    prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
+
+    auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
     url = f"http://109.107.170.211:8000/api/v1/start_generation"
     data = {
         "prompt": prompt

@@ -8,7 +8,6 @@ import traceback
 import difflib as dif
 import time
 
-from selenium.webdriver.common.devtools.v139.runtime import await_promise
 from sqlalchemy import or_, and_
 
 from pyrogram import Client
