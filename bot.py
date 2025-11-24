@@ -44,8 +44,19 @@ async def handle_start(message: types.Message):
     # if user_id not in user_lists:
     #     await message.answer("Ваш доступ ограничен. Обратитесь к администратору.")
 
-    status, topics = await read_data_from_db_filter_limit_universal('topics', 100, 1)#            read_data_from_db(Topics, 100, 1)
-    topic_lists = [i.topic for i in topics]
+    topic_lists = []
+    for i in range(5):
+        status, topics = await read_data_from_db_filter_limit_universal('topics', 100, 1)#
+
+        if status:
+            topic_lists = [i.topic for i in topics]
+            break
+
+        await asyncio.sleep(5)
+
+    if not topic_lists:
+        await message.answer("Не удалось получить данные из базы данных. Попробуйте позже.")
+        return
 
     inline_keyboard = []
 
@@ -91,6 +102,15 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     filter2 = Prompt.project_name == 'tg_news'
     status, prompt_context = await read_data_from_db_filter_limit_universal('prompts', 1, 1, filter2)
 
+    # 💥 Добавить проверку статуса
+    if not status:
+        await callback.message.answer("Не удалось получить данные из истории. Попробуйте позже.")
+        return
+
+    if not prompt_context:
+        await callback.message.answer("Не найден контекст промпта для генерации.")
+        return
+
     prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
 
     auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
@@ -108,7 +128,8 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
             await callback.message.answer(result)
 
         else:
-            await callback.message.answer(response.status_code)
+            #await callback.message.answer(response.status_code)
+            await callback.message.answer(f"Ошибка API. Код: {response.status_code}. Проверьте сервер.")
 
 dp.include_router(router)
 

@@ -79,7 +79,7 @@ async def read_data_from_db_filter_limit_universal(table_name: str, limit, page,
             return True, results
 
         except Exception as Ex:
-            return False, Ex
+            return False, []
 
 
 async def add_data_to_db_universal(datas):
@@ -172,6 +172,8 @@ async def update_universal(session, query):
 async def read_universal(session, query):
     result = await session.execute(query)
     return result.scalars().all()
+
+
 
 
 if "__main__" in __name__:
