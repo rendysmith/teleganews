@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 
 from utils.db_loader import read_data_from_db_filter_limit_universal
-from models.mdl_tables import History, Prompt
+from models.mdl_tables import History, Prompt, Topics
 
 load_dotenv()
 
@@ -110,7 +110,10 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("Не найден контекст промпта для генерации.")
         return
 
-    prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
+    filter3 = Topics.topic == topic
+    status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter3)
+
+    prompt = prompt_context[0].prompt.format(short_history=short_history, topic=full_topic[0].description)
 
     auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
     url = f"http://109.107.170.211:8000/api/v1/start_generation"

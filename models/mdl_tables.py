@@ -296,6 +296,7 @@ class Topics(Base):
 
     topic_id = Column(Integer, primary_key=True, autoincrement=True)
     topic = Column(String, nullable=False, index=True)
+    description = Column(String, nullable=False, index=True)
 
 class History(Base):
     """
