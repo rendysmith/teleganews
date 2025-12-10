@@ -8,3 +8,7 @@ sqlalchemy
 asyncpg
 greenlet
 apscheduler==3.10.4
+openai
+pgvector
+tgcrypto
+sentence-transformers

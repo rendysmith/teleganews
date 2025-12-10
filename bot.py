@@ -18,6 +18,7 @@ from requests.auth import HTTPBasicAuth
 
 from utils.db_loader import read_data_from_db_filter_limit_universal
 from models.mdl_tables import History, Prompt, Topics
+from utils.search_news import search_relevant_news
 
 load_dotenv()
 
@@ -93,8 +94,14 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     start_time = datetime.now() - timedelta(days=days)
     await callback.message.answer(f'Тема: "{topic}" за последние {days} дней.')
 
-    filters = History.date > start_time
-    status, history = await read_data_from_db_filter_limit_universal('history', 100, 1, filters)#            read_data_from_db(Topics, 100, 1)
+    filter3 = Topics.topic == topic
+    status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter3)
+    topic = full_topic[0].description
+
+    #filters = History.date > start_time
+    #status, history = await read_data_from_db_filter_limit_universal('history', 100, 1, filters)#            read_data_from_db(Topics, 100, 1)
+    history = await search_relevant_news(topic)
+
     short_history = [f"{i.message}\nlink: 'https://t.me/{i.channel}/{i.message_id}'" for i in history]
     #print(short_history)
 
@@ -110,10 +117,9 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("Не найден контекст промпта для генерации.")
         return
 
-    filter3 = Topics.topic == topic
-    status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter3)
 
-    prompt = prompt_context[0].prompt.format(short_history=short_history, topic=full_topic[0].description)
+
+    prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
 
     auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
     url = f"http://109.107.170.211:8000/api/v1/start_generation"

@@ -6,9 +6,12 @@ import os, re
 import traceback
 import difflib as dif
 import time
+from http.client import responses
 
+from openai import AsyncOpenAI, RateLimitError
 from sqlalchemy import or_, and_
 from pyrogram import Client
+from sentence_transformers import SentenceTransformer
 
 from pyrogram.errors.exceptions.bad_request_400 import (
     PeerIdInvalid,
@@ -49,6 +52,59 @@ current_path = os.path.dirname(os.path.dirname(__file__))
 dotenv_path = os.path.join(current_path, ".env")
 
 load_dotenv(dotenv_path)
+
+#GPT_TOKEN = os.getenv("GPT_TOKEN")
+#aclient = AsyncOpenAI(api_key=GPT_TOKEN)
+
+local_model = SentenceTransformer('cointegrated/rubert-tiny2')
+
+
+async def get_embedding(text):
+    """
+    Создает эмбеддинг локально и бесплатно.
+    Не нужен ни API ключ, ни интернет, ни деньги.
+    """
+    try:
+        # text.replace("\n", " ") - можно оставить, но руберт ест и с переносами
+        text = text.replace("\n", " ")
+
+        # Модель работает синхронно, но очень быстро.
+        # .tolist() нужен, чтобы превратить numpy array в обычный список для базы данных
+        return local_model.encode(text).tolist()
+
+    except Exception as e:
+        print(f"Ошибка при создании локального эмбеддинга: {e}")
+        return None
+
+
+async def get_embedding_openai(text):
+    if not GPT_TOKEN:
+        print("❌ КРИТИЧЕСКАЯ ОШИБКА: GPT_TOKEN пустой (None)!")
+        return None
+
+    masked_token = f"{GPT_TOKEN[:6]}...{GPT_TOKEN[-4:]}"
+    print(f"🔑 Использую токен: {masked_token}")
+
+    model = "text-embedding-3-small"
+    text = text.replace("\n", " ")
+
+    # Простая логика повторных попыток
+    for attempt in range(3):
+        try:
+            response = await aclient.embeddings.create(input=[text], model=model)
+            return response.data[0].embedding
+
+        except RateLimitError as e:
+            logger.info(f"⚠️ Попытка {attempt + 1}: OpenAI ответил 429. Текст ошибки: {e}")
+
+            # Если это лимит скорости - ждем
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            logger.warning(f"❌ Ошибка соединения: {e}")
+            return None
+
+    return None
 
 def diff(a, b):
     s = dif.SequenceMatcher(None, a, b)
@@ -188,13 +244,20 @@ async def get_parser_data():
                         if result3 != []:
                             continue
 
+                        #await asyncio.sleep(5)
+                        msg_emb = await get_embedding(msg)
+
+                        if msg_emb is None:
+                            logger.warning(f"Skipping msg {message_id} due to embedding error")
+
                         rec_datas = SimpleNamespace(
                             table_name='history',  # имя таблицы
                             datas={
                                 'date': message_date,
                                 'channel': channel,
                                 'message_id': message_id,
-                                'message': msg
+                                'message': msg,
+                                'message_emb': msg_emb
                             }
                         )
 
@@ -204,7 +267,7 @@ async def get_parser_data():
                         await asyncio.sleep(1)
 
                 except Exception as Ex1:
-                    print(f'Error1: {Ex1}')
+                    logging.warning(f'Error1: {Ex1}')
 
             update_data = SimpleNamespace(
                 table_name="channels",
@@ -257,7 +320,14 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        # a = asyncio.run(get_embedding('Каждый должен иметь шанс'))
+        # print('******************************')
+        # print(a)
+
+
         # Запускаем асинхронный цикл
         asyncio.run(main())
+
+
     except (KeyboardInterrupt, SystemExit):
         logger.info("Остановка парсера...")

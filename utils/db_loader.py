@@ -105,7 +105,7 @@ async def add_data_to_db_universal(datas):
                     if not hasattr(model, field):
                         txt = f"Поле {field} не существует в таблице {table_name}"
                         #print(txt)
-                        True, txt
+                        False, txt
 
                 #print("Model:", model)
                 _datas_ = model(**data_dict)
@@ -168,6 +168,10 @@ async def update_data_from_db_universal(datas):
 async def update_universal(session, query):
     await session.execute(query)
     await session.commit()
+
+async def read_universal(session, query):
+    result = await session.execute(query)
+    return result.scalars().all()
 
 async def read_universal(session, query):
     result = await session.execute(query)

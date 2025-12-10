@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, UUID, Column, Integer, String, Boolean, DateTime, JSON, func, Date
 from sqlalchemy.orm import sessionmaker, declarative_base
 import uuid
+from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
 
@@ -310,6 +311,7 @@ class History(Base):
     channel = Column(String, nullable=False, index=True)
     message_id = Column(Integer, nullable=False, index=True)
     message = Column(String, nullable=False, index=True)
+    message_emb = Column(Vector(312))
 
 
 
