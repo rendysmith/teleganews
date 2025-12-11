@@ -58,7 +58,6 @@ load_dotenv(dotenv_path)
 
 local_model = SentenceTransformer('cointegrated/rubert-tiny2')
 
-
 async def get_embedding(text):
     """
     Создает эмбеддинг локально и бесплатно.
@@ -75,7 +74,6 @@ async def get_embedding(text):
     except Exception as e:
         print(f"Ошибка при создании локального эмбеддинга: {e}")
         return None
-
 
 async def get_embedding_openai(text):
     if not GPT_TOKEN:
