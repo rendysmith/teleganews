@@ -311,7 +311,7 @@ class History(Base):
     channel = Column(String, nullable=False, index=True)
     message_id = Column(Integer, nullable=False, index=True)
     message = Column(String, nullable=False, index=True)
-    message_emb = Column(Vector(312))
+    message_emb = Column(Vector(312), nullable=False, index=True)
 
 
 

@@ -35,7 +35,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from utils.db_loader import (read_data_from_db_filter_limit_universal,
                              add_data_to_db_universal,
                              update_data_from_db_universal,
-                             update_universal)
+                             update_universal, delete_data_to_db_universal)
 
 from models.mdl_tables import Session, Channels, History
 
@@ -282,6 +282,14 @@ async def get_parser_data():
             print(f'Error2: {Ex2}')
             await asyncio.sleep(5)
 
+    delete_datas = SimpleNamespace(
+        table_name='history',  # название таблицы
+        datas={'days': 60}  # пустой словарь - данные не нужны для удаления
+    )
+    status6, result6 = await delete_data_to_db_universal(delete_datas)
+    print("6 Delete 2 mounths:", status6, result6)
+
+
 
 # --- ОБЕРТКА ДЛЯ ПЛАНИРОВЩИКА ---
 async def main():
@@ -292,7 +300,7 @@ async def main():
 
     # ---------------- НАСТРОЙКА РАСПИСАНИЯ ----------------
     # Вариант А: Интервал (например, каждые 30 минут)
-    scheduler.add_job(get_parser_data, "interval", minutes=30)
+    scheduler.add_job(get_parser_data, "interval", hours=1)
 
     # Вариант Б: Конкретное время (например, каждый день в 09:00)
     # scheduler.add_job(get_parser_data, "cron", hour=9, minute=0)

@@ -2,9 +2,9 @@ import asyncio
 from venv import logger
 
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import text, update, insert, inspect
+from sqlalchemy import text, update, insert, inspect, delete
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -165,6 +165,41 @@ async def update_data_from_db_universal(datas):
                 await session.rollback()
                 return False, f"Ошибка: {str(e)}"
 
+async def delete_data_to_db_universal(datas):
+    table_name = datas.table_name
+    data_dict = datas.datas
+
+    async with SessionLocal() as session:
+        async with session.begin():
+            try:
+                # Поиск модели по названию таблицы
+                model = None
+                for mapper in Base.registry.mappers:
+                    if mapper.class_.__tablename__ == table_name:
+                        model = mapper.class_
+                        break
+
+                if not model:
+                    txt = f"Таблица {table_name} не найдена"
+                    return False, txt
+
+                # Удаление данных старше указанного количества дней
+                if hasattr(model, 'date'):
+                    days = data_dict.get('days', 60)  # по умолчанию 60 дней
+                    cutoff_date = datetime.now() - timedelta(days=days)
+                    delete_query = delete(model).where(model.date < cutoff_date)
+                    result = await session.execute(delete_query)
+                    await session.commit()
+
+                    deleted_count = result.rowcount
+                    return True, f'Удалено {deleted_count} записей старше {days} дней.'
+                else:
+                    return False, f'Таблица {table_name} не имеет колонки "date"'
+
+            except Exception as Ex:
+                await session.rollback()
+                return False, str(Ex)
+
 async def update_universal(session, query):
     await session.execute(query)
     await session.commit()
@@ -173,7 +208,7 @@ async def read_universal(session, query):
     result = await session.execute(query)
     return result.scalars().all()
 
-async def read_universal(session, query):
+async def delete_universal(session, query):
     result = await session.execute(query)
     return result.scalars().all()
 

@@ -19,10 +19,12 @@ from requests.auth import HTTPBasicAuth
 from utils.db_loader import read_data_from_db_filter_limit_universal
 from models.mdl_tables import History, Prompt, Topics
 from utils.search_news import search_relevant_news
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
-
-logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -87,7 +89,7 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     days = int(callback.data.split(":")[1])
     print(days)
 
-    data = await state.get_data()  # получаем всё
+    data = await state.get_data()
     print(data)
     topic = data['topic']
 
@@ -98,46 +100,125 @@ async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter3)
     topic = full_topic[0].description
 
-    #filters = History.date > start_time
-    #status, history = await read_data_from_db_filter_limit_universal('history', 100, 1, filters)#            read_data_from_db(Topics, 100, 1)
     history = await search_relevant_news(topic)
-
     short_history = [f"{i.message}\nlink: 'https://t.me/{i.channel}/{i.message_id}'" for i in history]
-    #print(short_history)
 
     filter2 = Prompt.project_name == 'tg_news'
     status, prompt_context = await read_data_from_db_filter_limit_universal('prompts', 1, 1, filter2)
 
-    # 💥 Добавить проверку статуса
-    if not status:
-        await callback.message.answer("Не удалось получить данные из истории. Попробуйте позже.")
+    if not status or not prompt_context:
+        await callback.message.answer("Не удалось получить данные. Попробуйте позже.")
         return
-
-    if not prompt_context:
-        await callback.message.answer("Не найден контекст промпта для генерации.")
-        return
-
-
 
     prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
 
     auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
     url = f"http://109.107.170.211:8000/api/v1/start_generation"
-    data = {
+    payload = {
         "prompt": prompt
     }
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(url, json=data, auth=auth)
+    # Retry логика (3 попытки)
+    max_retries = 3
+    retry_count = 0
+    result_text = None
 
-        if response.status_code == 200:
-            result = response.json()['result'][1]
-            print(result)
-            await callback.message.answer(result)
+    while retry_count < max_retries:
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(url, json=payload, auth=auth)
 
-        else:
-            #await callback.message.answer(response.status_code)
-            await callback.message.answer(f"Ошибка API. Код: {response.status_code}. Проверьте сервер.")
+                if response.status_code == 200:
+                    result_text = response.json()['result'][1]
+                    print(result_text)
+                    await callback.message.answer(result_text)
+                    return
+
+                elif response.status_code in [500, 502, 503, 504]:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        wait_time = 2 ** retry_count  # exponential backoff: 2, 4, 8 сек
+                        print(f"Ошибка {response.status_code}. Попытка {retry_count}/{max_retries}. Ждём {wait_time} сек...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        await callback.message.answer("Ошибка сервера генерации. Попробуйте позже.")
+                        return
+
+                else:
+                    await callback.message.answer(f"Ошибка API. Код: {response.status_code}. Проверьте сервер.")
+                    return
+
+        except AsyncClient.TimeoutException:
+            retry_count += 1
+            if retry_count < max_retries:
+                wait_time = 2 ** retry_count
+                print(f"Таймаут. Попытка {retry_count}/{max_retries}. Ждём {wait_time} сек...")
+                await asyncio.sleep(wait_time)
+                continue
+            else:
+                await callback.message.answer("Время ожидания истекло. Сервер не отвечает.")
+                return
+
+        except Exception as e:
+            print(f"Непредвиденная ошибка: {str(e)}")
+            await callback.message.answer(f"Ошибка: {str(e)}")
+            return
+
+# @router.callback_query(F.data.startswith("days:"))
+# async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
+#     days = int(callback.data.split(":")[1])
+#     print(days)
+#
+#     data = await state.get_data()  # получаем всё
+#     print(data)
+#     topic = data['topic']
+#
+#     start_time = datetime.now() - timedelta(days=days)
+#     await callback.message.answer(f'Тема: "{topic}" за последние {days} дней.')
+#
+#     filter3 = Topics.topic == topic
+#     status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter3)
+#     topic = full_topic[0].description
+#
+#     #filters = History.date > start_time
+#     #status, history = await read_data_from_db_filter_limit_universal('history', 100, 1, filters)#            read_data_from_db(Topics, 100, 1)
+#     history = await search_relevant_news(topic)
+#
+#     short_history = [f"{i.message}\nlink: 'https://t.me/{i.channel}/{i.message_id}'" for i in history]
+#     #print(short_history)
+#
+#     filter2 = Prompt.project_name == 'tg_news'
+#     status, prompt_context = await read_data_from_db_filter_limit_universal('prompts', 1, 1, filter2)
+#
+#     # 💥 Добавить проверку статуса
+#     if not status:
+#         await callback.message.answer("Не удалось получить данные из истории. Попробуйте позже.")
+#         return
+#
+#     if not prompt_context:
+#         await callback.message.answer("Не найден контекст промпта для генерации.")
+#         return
+#
+#     prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
+#
+#     auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
+#     url = f"http://109.107.170.211:8000/api/v1/start_generation"
+#     data = {
+#         "prompt": prompt
+#     }
+#
+#     async with httpx.AsyncClient(timeout=120) as client:
+#         response = await client.post(url, json=data, auth=auth)
+#
+#         if response.status_code == 200:
+#             result = response.json()['result'][1]
+#             print(result)
+#             await callback.message.answer(result)
+#
+#         else:
+#             #await callback.message.answer(response.status_code)
+#             await callback.message.answer(f"Ошибка API. Код: {response.status_code}. Проверьте сервер.")
 
 dp.include_router(router)
 
