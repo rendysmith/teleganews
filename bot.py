@@ -1,25 +1,20 @@
-# bot.py
 import asyncio
-import logging
 import os
-from datetime import datetime, timedelta
-
-import httpx
+import logging
 
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import CommandStart
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
 
 from dotenv import load_dotenv
-from requests.auth import HTTPBasicAuth
 
-from utils.db_loader import read_data_from_db_filter_limit_universal
-from models.mdl_tables import History, Prompt, Topics
-from utils.search_news import search_relevant_news
-import logging
+from database.db_loader import read_data_from_db_filter_limit_universal
+from models.mdl_tables import Prompt, Topics
+
+# Импортируем наши новые крутые функции на базе LangChain
+from services.search_news import get_context_from_db, get_rag_chain
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -28,9 +23,6 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-LOGIN_GEN = os.getenv("LOGIN_GEN")
-PASS_GEN = os.getenv("PASS_GEN")
-
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден. Проверьте файл .env")
 
@@ -38,33 +30,27 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher()
 router = Router()
 
+
 @router.message(CommandStart())
 async def handle_start(message: types.Message):
-    #user_id = message.from_user.id
-    # status, users_ids = await read_data_from_db('white_list_users', 100, 1)
-    # user_lists = [i.user_id for i in users_ids]
-    # if user_id not in user_lists:
-    #     await message.answer("Ваш доступ ограничен. Обратитесь к администратору.")
-
     topic_lists = []
-    for i in range(5):
-        status, topics = await read_data_from_db_filter_limit_universal('topics', 100, 1)#
 
+    # Пытаемся получить темы из БД с ретраями
+    for _ in range(5):
+        status, topics = await read_data_from_db_filter_limit_universal('topics', 100, 1)
         if status:
             topic_lists = [i.topic for i in topics]
             break
-
         await asyncio.sleep(5)
 
     if not topic_lists:
         await message.answer("Не удалось получить данные из базы данных. Попробуйте позже.")
         return
 
-    inline_keyboard = []
-
-    for topic in topic_lists:
-        inline_keyboard.append([types.InlineKeyboardButton(text=topic, callback_data=f"topic:{topic}")])
-
+    # Динамически собираем клавиатуру
+    inline_keyboard = [[types.InlineKeyboardButton(text=topic, callback_data=f"topic:{topic}")]
+                       for topic in topic_lists
+                       ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
     await message.answer("Выбери тему:", reply_markup=keyboard)
@@ -73,157 +59,85 @@ async def handle_start(message: types.Message):
 @router.callback_query(F.data.startswith("topic:"))
 async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
     topic = callback.data.split(":")[1]
-    print(topic)
 
+    # Сохраняем выбор в машину состояний (FSM)
     await state.update_data(topic=topic)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text='за 14 дней', callback_data=f"days:14")],
-        [types.InlineKeyboardButton(text='за 30 дней', callback_data=f"days:30")]
-    ])
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[types.InlineKeyboardButton(text='за 14 дней', callback_data="days:14")],
+                         [types.InlineKeyboardButton(text='за 30 дней', callback_data="days:30")]
+                         ])
 
-    await callback.message.answer('Кол-во дней истории:', reply_markup=keyboard)
+    # Изменяем текущее сообщение вместо отправки нового
+    await callback.message.edit_text(f'Выбрана тема: *{topic}*\nВыберите период истории:', reply_markup=keyboard)
+
 
 @router.callback_query(F.data.startswith("days:"))
-async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
+async def handle_choice_days(callback: CallbackQuery, state: FSMContext):
     days = int(callback.data.split(":")[1])
-    print(days)
 
     data = await state.get_data()
-    print(data)
-    topic = data['topic']
+    topic_name = data.get('topic')
 
-    start_time = datetime.now() - timedelta(days=days)
-    await callback.message.answer(f'Тема: "{topic}" за последние {days} дней.')
-
-    filter3 = Topics.topic == topic
-    status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter3)
-    topic = full_topic[0].description
-
-    history = await search_relevant_news(topic)
-    short_history = [f"{i.message}\nlink: 'https://t.me/{i.channel}/{i.message_id}'" for i in history]
-
-    filter2 = Prompt.project_name == 'tg_news'
-    status, prompt_context = await read_data_from_db_filter_limit_universal('prompts', 1, 1, filter2)
-
-    if not status or not prompt_context:
-        await callback.message.answer("Не удалось получить данные. Попробуйте позже.")
+    if not topic_name:
+        await callback.answer("Ошибка сессии. Начните заново через /start", show_alert=True)
         return
 
-    prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
+    # =========================================================
+    # UX ФИШКА: Сразу даем пользователю обратную связь!
+    # =========================================================
+    wait_msg = await callback.message.edit_text(
+        f'⏳ *Анализирую тему "{topic_name}" за {days} дней.*\n\n'
+        f'Ищу релевантные посты и генерирую сводку. '
+        f'Обычно это занимает 1-2 минуты...'
+    )
 
-    auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
-    url = f"http://109.107.170.211:8000/api/v1/start_generation"
-    payload = {
-        "prompt": prompt
-    }
+    try:
+        # 1. Достаем полное описание темы из БД
+        filter_topic = Topics.topic == topic_name
+        status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter_topic)
+        topic_description = full_topic[0].description
 
-    # Retry логика (3 попытки)
-    max_retries = 3
-    retry_count = 0
-    result_text = None
+        # 2. Ищем новости в векторе (LangChain Retriever)
+        context_text = await get_context_from_db(topic_description, days=days)
 
-    while retry_count < max_retries:
-        try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                response = await client.post(url, json=payload, auth=auth)
-
-                if response.status_code == 200:
-                    result_text = response.json()['result'][1]
-                    print(result_text)
-                    await callback.message.answer(result_text)
-                    return
-
-                elif response.status_code in [500, 502, 503, 504]:
-                    retry_count += 1
-                    if retry_count < max_retries:
-                        wait_time = 2 ** retry_count  # exponential backoff: 2, 4, 8 сек
-                        print(f"Ошибка {response.status_code}. Попытка {retry_count}/{max_retries}. Ждём {wait_time} сек...")
-                        await asyncio.sleep(wait_time)
-                        continue
-                    else:
-                        await callback.message.answer("Ошибка сервера генерации. Попробуйте позже.")
-                        return
-
-                else:
-                    await callback.message.answer(f"Ошибка API. Код: {response.status_code}. Проверьте сервер.")
-                    return
-
-        except AsyncClient.TimeoutException:
-            retry_count += 1
-            if retry_count < max_retries:
-                wait_time = 2 ** retry_count
-                print(f"Таймаут. Попытка {retry_count}/{max_retries}. Ждём {wait_time} сек...")
-                await asyncio.sleep(wait_time)
-                continue
-            else:
-                await callback.message.answer("Время ожидания истекло. Сервер не отвечает.")
-                return
-
-        except Exception as e:
-            print(f"Непредвиденная ошибка: {str(e)}")
-            await callback.message.answer(f"Ошибка: {str(e)}")
+        if not context_text.strip():
+            await wait_msg.edit_text(
+                f"За последние {days} дней релевантных новостей по теме '{topic_name}' не найдено.")
             return
 
-# @router.callback_query(F.data.startswith("days:"))
-# async def handle_choice_topic(callback: CallbackQuery, state: FSMContext):
-#     days = int(callback.data.split(":")[1])
-#     print(days)
-#
-#     data = await state.get_data()  # получаем всё
-#     print(data)
-#     topic = data['topic']
-#
-#     start_time = datetime.now() - timedelta(days=days)
-#     await callback.message.answer(f'Тема: "{topic}" за последние {days} дней.')
-#
-#     filter3 = Topics.topic == topic
-#     status, full_topic = await read_data_from_db_filter_limit_universal('topics', 1, 1, filter3)
-#     topic = full_topic[0].description
-#
-#     #filters = History.date > start_time
-#     #status, history = await read_data_from_db_filter_limit_universal('history', 100, 1, filters)#            read_data_from_db(Topics, 100, 1)
-#     history = await search_relevant_news(topic)
-#
-#     short_history = [f"{i.message}\nlink: 'https://t.me/{i.channel}/{i.message_id}'" for i in history]
-#     #print(short_history)
-#
-#     filter2 = Prompt.project_name == 'tg_news'
-#     status, prompt_context = await read_data_from_db_filter_limit_universal('prompts', 1, 1, filter2)
-#
-#     # 💥 Добавить проверку статуса
-#     if not status:
-#         await callback.message.answer("Не удалось получить данные из истории. Попробуйте позже.")
-#         return
-#
-#     if not prompt_context:
-#         await callback.message.answer("Не найден контекст промпта для генерации.")
-#         return
-#
-#     prompt = prompt_context[0].prompt.format(short_history=short_history, topic=topic)
-#
-#     auth = HTTPBasicAuth(LOGIN_GEN, PASS_GEN)
-#     url = f"http://109.107.170.211:8000/api/v1/start_generation"
-#     data = {
-#         "prompt": prompt
-#     }
-#
-#     async with httpx.AsyncClient(timeout=120) as client:
-#         response = await client.post(url, json=data, auth=auth)
-#
-#         if response.status_code == 200:
-#             result = response.json()['result'][1]
-#             print(result)
-#             await callback.message.answer(result)
-#
-#         else:
-#             #await callback.message.answer(response.status_code)
-#             await callback.message.answer(f"Ошибка API. Код: {response.status_code}. Проверьте сервер.")
+        # 3. Достаем промпт из БД
+        filter_prompt = Prompt.project_name == 'tg_news'
+        status, prompt_context = await read_data_from_db_filter_limit_universal('prompts', 1, 1, filter_prompt)
+        prompt_template_str = prompt_context[0].prompt
+
+        # 4. СОБИРАЕМ И ЗАПУСКАЕМ ЦЕПОЧКУ LANGCHAIN (LCEL)
+        chain = get_rag_chain(prompt_template_str)
+
+        # Запускаем генерацию асинхронно
+        result_text = await chain.ainvoke({
+            "short_history": context_text,
+            "topic": topic_description
+        })
+
+        # 5. Заменяем сообщение ожидания на готовый результат от ИИ
+        await wait_msg.edit_text(result_text)
+
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка в процессе RAG: {e}")
+        await wait_msg.edit_text(
+            "Произошла ошибка при обращении к нейросети. Попробуйте выбрать другой период или тему.")
+
 
 dp.include_router(router)
 
+
 async def main():
+    logger.info("Бот запущен и готов к работе!")
+    # Игнорируем старые апдейты при старте
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

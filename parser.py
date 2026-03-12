@@ -1,43 +1,35 @@
-import asyncio
-import sys
-from datetime import datetime, timedelta, date
-import os, re
+import os
 
-import traceback
-import difflib as dif
-import time
-from http.client import responses
-
-from openai import AsyncOpenAI, RateLimitError
-from sqlalchemy import or_, and_
-from pyrogram import Client
-from sentence_transformers import SentenceTransformer
-
-from pyrogram.errors.exceptions.bad_request_400 import (
-    PeerIdInvalid,
-    UsernameNotOccupied,
-    UsernameInvalid,
-    UserAlreadyParticipant,
-    InviteHashExpired)
-from pyrogram.errors.exceptions.flood_420 import FloodTestPhoneWait, FloodWait
-
-from dotenv import load_dotenv
-import random
-
-from types import SimpleNamespace
+# =====================================================================
+# КРИТИЧЕСКИ ВАЖНО: Отключаем интернет для модели HuggingFace,
+# чтобы она не зависала на 15 секунд при проверке обновлений!
+os.environ['HF_HUB_OFFLINE'] = '1'
+# =====================================================================
 
 import asyncio
 import logging
 import sys
+import traceback
+import time
+import random
+from datetime import datetime, timedelta, date
+from types import SimpleNamespace
+
+from sqlalchemy import or_
+from pyrogram import Client
+from pyrogram.errors.exceptions.bad_request_400 import UserAlreadyParticipant
+from pyrogram.errors.exceptions.flood_420 import FloodWait
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sentence_transformers import SentenceTransformer
+from dotenv import load_dotenv
 
-
-from utils.db_loader import (read_data_from_db_filter_limit_universal,
-                             add_data_to_db_universal,
-                             update_data_from_db_universal,
-                             update_universal, delete_data_to_db_universal)
-
-from models.mdl_tables import Session, Channels, History
+from database.db_loader import (
+    read_data_from_db_filter_limit_universal,
+    add_data_to_db_universal,
+    update_data_from_db_universal,
+    delete_data_to_db_universal
+)
+from models.mdl_tables import Session, Channels
 
 # Настройка логирования (чтобы видеть output в логах Docker)
 logging.basicConfig(
@@ -48,78 +40,35 @@ logging.basicConfig(
 logger = logging.getLogger("ParserWorker")
 
 current_path = os.path.dirname(os.path.dirname(__file__))
-#csv_path = os.path.join(current_path, "channel_list.csv")
 dotenv_path = os.path.join(current_path, ".env")
-
 load_dotenv(dotenv_path)
 
-#GPT_TOKEN = os.getenv("GPT_TOKEN")
-#aclient = AsyncOpenAI(api_key=GPT_TOKEN)
-
+logger.info("Загрузка локальной модели HuggingFace...")
 local_model = SentenceTransformer('cointegrated/rubert-tiny2')
 
-async def get_embedding(text):
-    """
-    Создает эмбеддинг локально и бесплатно.
-    Не нужен ни API ключ, ни интернет, ни деньги.
-    """
-    try:
-        # text.replace("\n", " ") - можно оставить, но руберт ест и с переносами
-        text = text.replace("\n", " ")
 
-        # Модель работает синхронно, но очень быстро.
-        # .tolist() нужен, чтобы превратить numpy array в обычный список для базы данных
-        return local_model.encode(text).tolist()
-
-    except Exception as e:
-        print(f"Ошибка при создании локального эмбеддинга: {e}")
-        return None
-
-async def get_embedding_openai(text):
-    if not GPT_TOKEN:
-        print("❌ КРИТИЧЕСКАЯ ОШИБКА: GPT_TOKEN пустой (None)!")
-        return None
-
-    masked_token = f"{GPT_TOKEN[:6]}...{GPT_TOKEN[-4:]}"
-    print(f"🔑 Использую токен: {masked_token}")
-
-    model = "text-embedding-3-small"
+def _encode_text(text: str) -> list[float]:
+    """Синхронная функция векторизации"""
     text = text.replace("\n", " ")
+    return local_model.encode(text).tolist()
 
-    # Простая логика повторных попыток
-    for attempt in range(3):
-        try:
-            response = await aclient.embeddings.create(input=[text], model=model)
-            return response.data[0].embedding
 
-        except RateLimitError as e:
-            logger.info(f"⚠️ Попытка {attempt + 1}: OpenAI ответил 429. Текст ошибки: {e}")
+async def get_embedding(text):
+    """Асинхронная обертка для создания эмбеддинга"""
+    try:
+        # Выносим тяжелую математику в отдельный поток, чтобы не вешать Pyrogram
+        return await asyncio.to_thread(_encode_text, text)
+    except Exception as e:
+        logger.error(f"Ошибка при создании локального эмбеддинга: {e}")
+        return None
 
-            # Если это лимит скорости - ждем
-            await asyncio.sleep(5)
-
-        except Exception as e:
-            logger.warning(f"❌ Ошибка соединения: {e}")
-            return None
-
-    return None
-
-def diff(a, b):
-    s = dif.SequenceMatcher(None, a, b)
-    return s.ratio()
-
-def extract_flood_wait_seconds(error_message):
-    # Используем регулярное выражение для поиска числа в строке
-    match = re.search(r"wait of (\d+) seconds", error_message)
-    # Если найдено совпадение, возвращаем найденное число, иначе возвращаем None
-    return int(match.group(1)) if match else None
 
 async def get_session(api_id, api_hash):
-    bot_name = os.environ.get("BOT_NAME")
+    bot_name = os.environ.get("BOT_NAME", "my_bot")
     async with Client(name=bot_name, api_id=api_id, api_hash=api_hash) as client:
         session_string = await client.export_session_string()
-        print(session_string)
         return session_string
+
 
 async def get_parser_data():
     logger.info("▶ Start parsing iteration...")
@@ -128,128 +77,109 @@ async def get_parser_data():
 
     is_docker = os.path.exists("/.dockerenv")
 
-    filters = Session.block_time < time_now #если временная блокировка акка
+    # 1. Получаем сессии
+    filters = Session.block_time < time_now
     status, session_df = await read_data_from_db_filter_limit_universal('sessions', 100, 1, filters)
 
-    sessionS = []
+    sessions_list = []
     for session in session_df:
-        if session.session == None:
+        if not session.session:
             if is_docker:
-                continue  # пропускаем в Docker
-
+                continue  # пропускаем генерацию сессии внутри Docker
             else:
                 api_id = session.api_id
                 api_hash = session.api_hash
                 session_string = await get_session(api_id, api_hash)
 
-                filter_params = {
-                    'api_id': api_id,
-                    'api_hash': api_hash
-                }
-
-                update_data = {
-                    'session': session_string
-                }
-
-                await update_data_in_db(Session, filter_params, update_data)
-
+                update_data = SimpleNamespace(
+                    table_name="sessions",
+                    filter_column="api_id",
+                    filter_value=api_id,
+                    column="session",
+                    new_data=session_string
+                )
+                await update_data_from_db_universal(update_data)
         else:
-            sessionS.append(session)
+            sessions_list.append(session)
 
-    if sessionS == []:
-        txt_error = f"!!! Все сессии во временном бане."
-        print(txt_error)
+    if not sessions_list:
+        logger.error("!!! Нет доступных сессий (или все во временном бане).")
         return
 
-    filters2 = or_(Channels.last_checked_at != date_now,
-                   Channels.last_checked_at.is_(None))
+    # 2. Получаем каналы
+    filters2 = or_(Channels.last_checked_at != date_now, Channels.last_checked_at.is_(None))
+    status, channels_list = await read_data_from_db_filter_limit_universal('channels', 100, 1, filters2)
 
-    status, CHANNELS = await read_data_from_db_filter_limit_universal('channels', 100, 1, filters2)
-    random.shuffle(CHANNELS)
-
-    len_df = len(CHANNELS)
-    print("len_df:", len_df)
-    if len_df == 0:
+    if not channels_list:
+        logger.info("Нет каналов для проверки (или все уже проверены сегодня).")
         return
 
-    for _idx_, channel_data in enumerate(CHANNELS):
-        if _idx_ >= 7: #опрашивать 7 каналов за раз.
+    # Превращаем в список и перемешиваем
+    channels_list = list(channels_list)
+    random.shuffle(channels_list)
+
+    # 3. Начинаем парсинг
+    for _idx_, channel_data in enumerate(channels_list):
+        if _idx_ >= 7:  # Опрашивать не более 7 каналов за одну итерацию
             logger.info("Batch limit reached (7 channels). Finishing job.")
             return
 
         channel = channel_data.channel
+        idx_ses = random.randrange(0, len(sessions_list))
 
-        idx_ses = random.randrange(0, len(sessionS))
-
-        bot_name = sessionS[idx_ses].user_name
-        api_id = sessionS[idx_ses].api_id
-        api_hash = sessionS[idx_ses].api_hash
-        session_string = sessionS[idx_ses].session
+        bot_name = sessions_list[idx_ses].user_name
+        api_id = sessions_list[idx_ses].api_id
+        api_hash = sessions_list[idx_ses].api_hash
+        session_string = sessions_list[idx_ses].session
 
         try:
             async with Client(
-                name=bot_name,
-                api_id=api_id,
-                api_hash=api_hash,
-                session_string=session_string,
-                in_memory=True,
+                    name=bot_name,
+                    api_id=api_id,
+                    api_hash=api_hash,
+                    session_string=session_string,
+                    in_memory=True,
             ) as client:
 
-                print(f"\nConnect {bot_name}: --------- https://t.me/{channel} ----------> {time.ctime()}")
+                logger.info(f"\nConnect {bot_name}: --------- https://t.me/{channel} ----------> {time.ctime()}")
+
                 try:
                     if 't.me/+' in channel:
-                        base_url = ''
                         try:
                             chat = await client.join_chat(channel)
-
                         except FloodWait as fw:
-                            txt = f"-- Error 420: {api_id}\n{str(fw)}"
-                            traceback.print_exc()
-                            errors = True
-
+                            logger.warning(f"-- Error 420 (FloodWait): {api_id}\n{str(fw)}")
+                            continue
                         except UserAlreadyParticipant:
                             chat = await client.get_chat(channel)
-
                     else:
-                        base_url = 'https://t.me/'
                         chat = await client.get_chat(channel)
 
-                    new_datas = []
+                    # ПАРСИМ ИСТОРИЮ
                     async for message in client.get_chat_history(chat_id=chat.id, limit=100):
-                        print(f'\n**************{message.id}***************')
                         message_date = message.date
-                        print(message_date)
-                        current_date = datetime.now()
-                        week_ago = current_date - timedelta(days=30)
+                        week_ago = datetime.now() - timedelta(days=30)
 
                         if message_date < week_ago:
-                            print('msg > 30 дней')
+                            logger.info(f'Дошли до старых сообщений (> 30 дней) в канале {channel}. Стоп.')
                             break
 
                         message_id = message.id
-                        msg = message.text if message.text is not None else message.caption
+                        msg = message.text if message.text else message.caption
 
-                        #print(f'MSG = {msg}')
-                        if msg is None:
+                        if not msg:
                             continue
 
-                        filters3 = and_(History.channel == channel,
-                                       History.message_id == message_id)
-
-                        status3, result3 = await read_data_from_db_filter_limit_universal('history', 1, 1, filters3)
-                        print(f"3 check data: {status3}")
-
-                        if result3 != []:
-                            continue
-
-                        #await asyncio.sleep(5)
+                        # Получаем эмбеддинг
                         msg_emb = await get_embedding(msg)
 
+                        # ЗАЩИТА ОТ NULL ВЕКТОРОВ В БД!
                         if msg_emb is None:
-                            logger.warning(f"Skipping msg {message_id} due to embedding error")
+                            logger.warning(f"Пропуск сообщения {message_id}: ошибка генерации вектора")
+                            continue
 
                         rec_datas = SimpleNamespace(
-                            table_name='history',  # имя таблицы
+                            table_name='history',
                             datas={
                                 'date': message_date,
                                 'channel': channel,
@@ -259,14 +189,19 @@ async def get_parser_data():
                             }
                         )
 
+                        # База сама отсечет дубли (UniqueConstraint) и вернет 'Дубликат проигнорирован'
                         status4, result4 = await add_data_to_db_universal(rec_datas)
-                        print(f"4 Add new row: {status4} {result4}")
 
-                        await asyncio.sleep(1)
+                        # Выводим в лог только если это реально новое сообщение
+                        if status4 and "Дубликат" not in result4:
+                            logger.info(f"Добавлено новое сообщение {message_id}")
+
+                        await asyncio.sleep(1)  # Не спамим Телеграм API
 
                 except Exception as Ex1:
-                    logging.warning(f'Error1: {Ex1}')
+                    logger.warning(f'Ошибка обработки канала {channel}: {Ex1}')
 
+            # 4. Обновляем статус канала (проверено сегодня)
             update_data = SimpleNamespace(
                 table_name="channels",
                 column="last_checked_at",
@@ -274,66 +209,43 @@ async def get_parser_data():
                 filter_value=channel,
                 new_data=date_now
             )
-
             status5, result5 = await update_data_from_db_universal(update_data)
-            print("5 update last date:", status5, result5)
+            logger.info(f"Обновлена дата проверки для {channel}: {status5} {result5}")
 
         except Exception as Ex2:
-            print(f'Error2: {Ex2}')
+            logger.error(f'Ошибка сессии {bot_name}: {Ex2}')
             await asyncio.sleep(5)
 
+    # 5. Очистка старых данных из БД (старше 60 дней)
     delete_datas = SimpleNamespace(
-        table_name='history',  # название таблицы
-        datas={'days': 60}  # пустой словарь - данные не нужны для удаления
+        table_name='history',
+        datas={'days': 60}
     )
     status6, result6 = await delete_data_to_db_universal(delete_datas)
-    print("6 Delete 2 mounths:", status6, result6)
+    logger.info(f"Очистка старых записей (2 месяца): {status6} {result6}")
 
 
-
-# --- ОБЕРТКА ДЛЯ ПЛАНИРОВЩИКА ---
 async def main():
     logger.info("Запуск контейнера парсера...")
 
     # Инициализируем планировщик
     scheduler = AsyncIOScheduler()
-
-    # ---------------- НАСТРОЙКА РАСПИСАНИЯ ----------------
-    # Вариант А: Интервал (например, каждые 30 минут)
     scheduler.add_job(get_parser_data, "interval", hours=1)
-
-    # Вариант Б: Конкретное время (например, каждый день в 09:00)
-    # scheduler.add_job(get_parser_data, "cron", hour=9, minute=0)
-    # ------------------------------------------------------
-
-    # Запускаем планировщик
     scheduler.start()
     logger.info("Планировщик запущен. Ожидание задач...")
 
-    # (Опционально) Запустить один раз сразу при старте контейнера
     logger.info("Выполняю первичный запуск при старте...")
     await get_parser_data()
 
-    # ВАЖНО: Бесконечное ожидание.
-    # Без этого скрипт дойдет до конца файла, завершится, и Docker остановит контейнер.
+    # Бесконечное ожидание
     try:
-        # Эффективный способ "спать вечно", не нагружая процессор
         await asyncio.Event().wait()
     except (KeyboardInterrupt, SystemExit):
         pass
 
 
-
 if __name__ == "__main__":
     try:
-        # a = asyncio.run(get_embedding('Каждый должен иметь шанс'))
-        # print('******************************')
-        # print(a)
-
-
-        # Запускаем асинхронный цикл
         asyncio.run(main())
-
-
     except (KeyboardInterrupt, SystemExit):
         logger.info("Остановка парсера...")

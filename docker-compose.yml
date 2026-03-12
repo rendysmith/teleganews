@@ -1,4 +1,5 @@
-version: '3.8' # Можно оставить, но Docker его игнорирует
+version: '3.8'
+
 services:
   # --- 1. Телеграм Бот ---
   telegram-bot:
@@ -7,14 +8,17 @@ services:
       dockerfile: Dockerfile.bot
     container_name: telega_bot
     restart: always
-    # Передаем файл .env, где указаны внешние POSTGRESQL_HOST и порт
     env_file: .env
+    networks:
+      - app_network
     volumes:
-      - ./sessions:/app/sessions  # Сохраняем сессии
+      - ./sessions:/app/sessions
       - ./logs:/app/logs
-    # Порт 8080 - пример, если боту нужен вебхук или health check
-    # ports:
-    #   - "8080:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # --- 2. Парсер (с планировщиком) ---
   data-parser:
@@ -23,10 +27,18 @@ services:
       dockerfile: Dockerfile.parser
     container_name: telega_parser
     restart: always
-    # Передаем файл .env, где указаны внешние POSTGRESQL_HOST и порт
     env_file: .env
+    networks:
+      - app_network
     volumes:
-      - ./sessions:/app/sessions  # Общая папка с сессиями
+      - ./sessions:/app/sessions
       - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-# Секция volumes удалена, так как нет локальной базы данных
+networks:
+  app_network:
+    driver: bridge

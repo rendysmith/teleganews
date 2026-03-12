@@ -1,14 +1,45 @@
+# Core
 aiogram==3.12.0
 python-dotenv==1.0.1
+pydantic-settings==2.1.0
+
+# Telegram
 pyrogram
-requests
-httpx
-pandas
-sqlalchemy
+TgCrypto
+
+# Database
+sqlalchemy>=2.0
 asyncpg
-greenlet
-apscheduler==3.10.4
-openai
+alembic
 pgvector
-tgcrypto
+
+# Async
+aiohttp
+httpx
+
+# Embeddings & LLM
+openai>=1.0
 sentence-transformers
+langchain>=0.1
+langchain-openai
+langchain-community
+
+# Data processing
+pandas
+numpy
+
+# Scheduling
+apscheduler==3.10.4
+
+# Utilities
+requests
+tenacity>=8.0  # Retry logic
+loguru==0.7.2  # Logging
+python-dateutil
+
+# Utils
+greenlet
+
+# Optional: Redis для кэша (если масштабироваться)
+# redis>=5.0
+# hiredis
