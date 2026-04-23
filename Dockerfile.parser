@@ -11,6 +11,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY parser.py .
 COPY models/ ./models/
-COPY utils/ ./utils/
+COPY services/ ./services/
 
 CMD ["python", "parser.py"]

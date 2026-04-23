@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем код
 COPY bot.py .
 COPY models/ ./models/
-COPY utils/ ./utils/
+COPY services/ ./services/
 
 # Запускаем (исправлена опечатка в конце строки)
 CMD ["python", "bot.py"]
