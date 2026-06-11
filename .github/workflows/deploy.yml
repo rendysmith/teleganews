@@ -29,6 +29,9 @@ jobs:
             export DOCKER_BUILDKIT=1
             export COMPOSE_PARALLEL_LIMIT=1
 
+            # Место на диске: после неудачных сборок остаются слои Docker
+            docker builder prune -f || true
+
             # pip-зависимости ставим один раз в base-образ (не параллельно в двух контейнерах)
             docker build -f Dockerfile.base -t teleganews-base:latest .
 
