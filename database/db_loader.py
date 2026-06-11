@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import List, Any
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.exc import IntegrityError
 from dotenv import load_dotenv
 
 from models.mdl_tables import Base, Prompt, Session, Channels, Topics, History
@@ -65,6 +65,59 @@ def get_model(table_name: str):
 
 
 # =======================================================
+# СХЕМА HISTORY: constraint + дедупликация
+# =======================================================
+
+async def ensure_history_unique_constraint() -> None:
+    """Удаляет накопившиеся дубли и создаёт UNIQUE (channel, message_id) в БД."""
+    async with engine.begin() as conn:
+        dedupe_result = await conn.execute(text("""
+            DELETE FROM tg_ai.history h1
+            USING tg_ai.history h2
+            WHERE h1.history_id > h2.history_id
+              AND h1.channel = h2.channel
+              AND h1.message_id = h2.message_id
+        """))
+        if dedupe_result.rowcount:
+            logger.info(f"Удалено {dedupe_result.rowcount} дубликатов из tg_ai.history")
+
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'uq_channel_message'
+                      AND conrelid = 'tg_ai.history'::regclass
+                ) THEN
+                    ALTER TABLE tg_ai.history
+                    ADD CONSTRAINT uq_channel_message UNIQUE (channel, message_id);
+                END IF;
+            END $$;
+        """))
+        logger.info("Unique constraint uq_channel_message проверен/создан")
+
+
+async def _add_history_record(data_dict: dict) -> tuple[bool, str]:
+    async with SessionLocal() as session:
+        try:
+            stmt = (
+                insert(History)
+                .values(**data_dict)
+                .on_conflict_do_nothing(constraint='uq_channel_message')
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            if result.rowcount:
+                return True, 'Данные успешно добавлены'
+            return True, 'Дубликат проигнорирован базой (IntegrityError)'
+
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Ошибка добавления в history: {e}")
+            return False, str(e)
+
+
+# =======================================================
 # УНИВЕРСАЛЬНЫЕ CRUD ФУНКЦИИ
 # =======================================================
 
@@ -97,6 +150,9 @@ async def add_data_to_db_universal(datas) -> tuple[bool, str]:
     table_name = datas.table_name
     data_dict = datas.datas
 
+    if table_name == 'history':
+        return await _add_history_record(data_dict)
+
     model = get_model(table_name)
     if not model:
         return False, f"Таблица {table_name} не найдена"
@@ -107,12 +163,6 @@ async def add_data_to_db_universal(datas) -> tuple[bool, str]:
             session.add(new_record)
             await session.commit()
             return True, 'Данные успешно добавлены'
-
-        except IntegrityError:
-            # ОШИБКА ДУБЛИКАТА: Сработает UniqueConstraint.
-            # Тихо откатываем транзакцию, это нормальное поведение для парсера.
-            await session.rollback()
-            return True, 'Дубликат проигнорирован базой (IntegrityError)'
 
         except Exception as e:
             await session.rollback()

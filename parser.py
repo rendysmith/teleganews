@@ -27,7 +27,8 @@ from database.db_loader import (
     read_data_from_db_filter_limit_universal,
     add_data_to_db_universal,
     update_data_from_db_universal,
-    delete_data_to_db_universal
+    delete_data_to_db_universal,
+    ensure_history_unique_constraint,
 )
 from models.mdl_tables import Session, Channels
 
@@ -227,6 +228,8 @@ async def get_parser_data():
 
 async def main():
     logger.info("Запуск контейнера парсера...")
+
+    await ensure_history_unique_constraint()
 
     # Инициализируем планировщик
     scheduler = AsyncIOScheduler()
