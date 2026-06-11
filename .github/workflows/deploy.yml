@@ -16,6 +16,8 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           port: 22
+          # Сборка образов (pip + sentence-transformers/torch) занимает >10 мин
+          command_timeout: 45m
           script: |
             # 1. Переходим в папку проекта (замени путь на свой!)
             cd /root/teleganews

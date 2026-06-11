@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем код
 COPY bot.py .
+COPY database/ ./database/
 COPY models/ ./models/
 COPY services/ ./services/
 
