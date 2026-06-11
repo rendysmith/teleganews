@@ -1,13 +1,4 @@
-# Используем ту же версию, что и в боте, для экономии места (слои кэшируются)
-FROM python:3.12-slim
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+FROM teleganews-base:latest
 
 COPY parser.py .
 COPY database/ ./database/

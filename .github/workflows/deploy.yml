@@ -3,7 +3,7 @@ name: Production Deploy
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Позволяет запустить вручную кнопку в GitHub
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -16,19 +16,24 @@ jobs:
           username: ${{ secrets.VDS_USER }}
           key: ${{ secrets.VDS_SSH_KEY }}
           port: 22
-          # Сборка образов (pip + sentence-transformers/torch) занимает >10 мин
-          command_timeout: 45m
+          command_timeout: 90m
           script: |
-            # 1. Переходим в папку проекта (замени путь на свой!)
+            set -euo pipefail
+
             cd /root/teleganews
-            
-            # 2. Обновляем код
-            git pull origin main
-            
-            # 3. Пересобираем и перезапускаем контейнеры в фоне
-            # Docker Compose автоматически остановит и удалит старые контейнеры, 
-            # а новый сервис "db" не будет запущен.
-            docker compose up -d --build
-            
-            # 4. Чистим старые неиспользуемые образы
+
+            # Сбрасываем локальные правки на сервере (иначе git pull падает и остаётся старый код)
+            git fetch origin main
+            git reset --hard origin/main
+
+            export DOCKER_BUILDKIT=1
+            export COMPOSE_PARALLEL_LIMIT=1
+
+            # pip-зависимости ставим один раз в base-образ (не параллельно в двух контейнерах)
+            docker build -f Dockerfile.base -t teleganews-base:latest .
+
+            # Пересборка только слоя с кодом, если requirements.txt не менялся — секунды
+            docker compose build
+            docker compose up -d
+
             docker image prune -f
