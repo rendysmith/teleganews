@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+# Общий образ с pip-зависимостями — ставим один раз, не в каждом сервисе
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+# TgCrypto и часть ML-пакетов собираются из исходников
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
