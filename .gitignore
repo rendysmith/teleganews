@@ -1,2 +1,20 @@
+# Секреты
 .env
-.session
+
+# IDE
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Виртуальные окружения
+.venv*/
+venv/
+
+# Логи
+logs/
+
+# Сессии Telegram (файловые)
+sessions/
+*.session
